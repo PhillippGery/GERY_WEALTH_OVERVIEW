@@ -498,7 +498,7 @@ tr:hover td{background:var(--surface2);}
         <div style="font-size:12px;color:var(--muted);line-height:1.9;">
           <div style="margin-bottom:12px;"><strong style="color:var(--accent);">Claude (Anthropic)</strong><br>→ <a href="https://console.anthropic.com" target="_blank" style="color:var(--blue);">console.anthropic.com</a><br><span data-de="→ API Keys → Create Key → beginnt mit sk-ant-" data-en="→ API Keys → Create Key → starts with sk-ant-">→ API Keys → Create Key → beginnt mit sk-ant-</span></div>
           <div style="margin-bottom:12px;"><strong style="color:var(--accent);">GPT (OpenAI)</strong><br>→ <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--blue);">platform.openai.com/api-keys</a><br><span data-de="→ Create new secret key → beginnt mit sk-" data-en="→ Create new secret key → starts with sk-">→ Create new secret key → beginnt mit sk-</span></div>
-          <div><strong style="color:var(--accent);">Gemini (Google)</strong><br>→ <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com/app/apikey</a><br><span data-de="→ Get API key → beginnt mit AIza" data-en="→ Get API key → starts with AIza">→ Get API key → beginnt mit AIza</span></div>
+          <div><strong style="color:var(--accent);">Gemini (Google)</strong><br>→ <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com/app/apikey</a><br><span data-de="→ Get API key → beginnt mit AIza" data-en="→ Get API key → starts with AIza">→ Get API key → beginnt mit AIza</span><br><span style="color:var(--yellow);font-size:10px;" data-de="⚠ Nur AI Studio Keys haben ein kostenloses Kontingent. Google Cloud Console Keys haben limit:0 und funktionieren nicht ohne Abrechnung." data-en="⚠ Only AI Studio keys include a free quota. Google Cloud Console keys have limit:0 and won't work without billing enabled.">⚠ Nur AI Studio Keys haben ein kostenloses Kontingent. Google Cloud Console Keys haben limit:0 und funktionieren nicht ohne Abrechnung.</span></div>
         </div>
         <div class="separator"></div>
         <div style="font-size:11px;color:var(--muted);line-height:1.7;" data-de="Der Key wird im localStorage deines Browsers gespeichert (getrennt von deinen Investitionsdaten). Er verlässt deinen Browser nur als verschlüsselte HTTPS-Anfrage an den Netlify-Proxy. Keine Drittpartei hat Zugriff." data-en="The key is stored in your browser localStorage (separate from your investment data). It leaves your browser only as an encrypted HTTPS request to the Netlify proxy. No third party has access.">Der Key wird im localStorage gespeichert (getrennt von Investitionsdaten). Er verlässt deinen Browser nur verschlüsselt via HTTPS. Keine Drittpartei hat Zugriff.</div>
@@ -792,8 +792,8 @@ async function fetchLivePrices() {
   const cryptoTrades = trades.filter(t => t.type === 'crypto');
   if (!cryptoTrades.length) return;
   const ids = [...new Set(cryptoTrades.map(t => getCoinId(t.asset)))];
-  // add common ones for ticker
-  ['bitcoin','ethereum','solana','binancecoin'].forEach(id => { if(!ids.includes(id)) ids.push(id); });
+  // add all market-page coins so they always show live prices
+  ['bitcoin','ethereum','solana','binancecoin','ripple','cardano','polkadot','avalanche-2'].forEach(id => { if(!ids.includes(id)) ids.push(id); });
   try {
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=eur&include_24hr_change=true`;
     const res = await fetch(url);
@@ -1210,6 +1210,22 @@ function onProviderChange() {
   const modelSel = document.getElementById('ai-model-select');
   const models   = AI_PROVIDER_MODELS[provider] || AI_PROVIDER_MODELS.claude;
   modelSel.innerHTML = models.map(m=>`<option value="${m}">${m}</option>`).join('');
+  // Show Gemini-specific warning
+  let geminiNote = document.getElementById('gemini-aistudio-note');
+  if (!geminiNote) {
+    geminiNote = document.createElement('div');
+    geminiNote.id = 'gemini-aistudio-note';
+    geminiNote.style.cssText = 'margin-top:10px;padding:8px 10px;background:#e8a02018;border:1px solid #e8a02040;border-radius:2px;font-size:11px;color:var(--yellow);font-family:"JetBrains Mono",monospace;line-height:1.6;';
+    document.getElementById('ai-api-key-input').closest('.ig').after(geminiNote);
+  }
+  if (provider === 'gemini') {
+    geminiNote.style.display = 'block';
+    geminiNote.innerHTML = lang==='de'
+      ? '⚠ Gemini-Key muss von <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> stammen (nicht Google Cloud Console). Cloud-Keys haben limit:0 und funktionieren ohne Abrechnung nicht.'
+      : '⚠ Gemini key must be from <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> (not Google Cloud Console). Cloud Console keys have limit:0 and won\'t work without billing.';
+  } else {
+    geminiNote.style.display = 'none';
+  }
 }
 
 function saveAISettings() {
