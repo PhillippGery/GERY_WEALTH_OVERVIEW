@@ -790,7 +790,7 @@ function getCoinId(symbol) {
 
 async function fetchLivePrices() {
   const cryptoTrades = trades.filter(t => t.type === 'crypto');
-  if (!cryptoTrades.length) return;
+  // always fetch even with no trades so the market page shows live data
   const ids = [...new Set(cryptoTrades.map(t => getCoinId(t.asset)))];
   // add all market-page coins so they always show live prices
   ['bitcoin','ethereum','solana','binancecoin','ripple','cardano','polkadot','avalanche-2'].forEach(id => { if(!ids.includes(id)) ids.push(id); });
@@ -815,6 +815,7 @@ async function fetchLivePrices() {
     toast(t('pricesUpdated') + ' ✓', 'green');
   } catch(e) {
     console.warn('CoinGecko fetch failed:', e.message);
+    toast(lang==='de'?'⚠ Preise konnten nicht geladen werden (CoinGecko). Erneut versuchen ↻':'⚠ Could not load prices (CoinGecko). Try refreshing ↻','red');
   }
 }
 
@@ -836,7 +837,7 @@ function updatePriceAge() {
 function updateLiveTicker() {
   const ticker = document.getElementById('live-ticker');
   if (!ticker) return;
-  const coins = [['BTC','bitcoin'],['ETH','ethereum'],['SOL','solana']];
+  const coins = [['BTC','bitcoin'],['ETH','ethereum'],['SOL','solana'],['BNB','binancecoin'],['XRP','ripple'],['ADA','cardano']];
   let html = '<span style="font-size:10px;color:var(--muted);font-family:\'JetBrains Mono\',monospace;margin-right:4px;"><span class="live-dot"></span>LIVE</span>';
   coins.forEach(([sym,id]) => {
     const p = livePrices[sym] || livePrices[id];
@@ -1194,7 +1195,7 @@ function importCSV(e) {
 const AI_PROVIDER_MODELS = {
   claude:  ['claude-haiku-4-5-20251001','claude-sonnet-4-5-20250929','claude-opus-4-5-20251101'],
   openai:  ['gpt-4o-mini','gpt-4o','gpt-4-turbo'],
-  gemini:  ['gemini-2.0-flash','gemini-2.0-flash-lite','gemini-1.5-pro'],
+  gemini:  ['gemini-2.0-flash','gemini-2.0-flash-lite','gemini-1.5-flash'],
 };
 
 function getAIConfig() {
@@ -1275,8 +1276,14 @@ async function testAIConnection() {
     result.textContent=`✓ ${cfg.provider.toUpperCase()} · ${cfg.model} — ${lang==='de'?'Verbindung erfolgreich!':'Connection successful!'}`;
   } catch(e) {
     result.style.color='var(--red)';
-    // Show full error detail so the user can see exactly what went wrong
-    result.innerHTML=`❌ ${e.message}<br><span style="font-size:10px;color:var(--muted);">${lang==='de'?'Tipp: Überprüfe API-Key und Modell in den Einstellungen.':'Tip: Check your API key and model in Settings.'}</span>`;
+    const isGemini = cfg.provider === 'gemini';
+    const isQuota  = e.message.toLowerCase().includes('quota') || e.message.includes('limit');
+    const tip = isGemini && isQuota
+      ? (lang==='de'
+          ? '⚠ Gemini-Kontingent erschöpft. Stelle sicher, dass dein Key von <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> stammt (nicht Google Cloud Console).'
+          : '⚠ Gemini quota exceeded. Make sure your key is from <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> (not Google Cloud Console).')
+      : (lang==='de'?'Tipp: Überprüfe API-Key und Modell in den Einstellungen.':'Tip: Check your API key and model in Settings.');
+    result.innerHTML=`❌ ${e.message}<br><span style="font-size:10px;color:var(--muted);">${tip}</span>`;
   }
 }
 
@@ -1747,11 +1754,11 @@ function renderAllocation() {
 function renderDashPrices() {
   const el=document.getElementById('dash-prices');
   if(!el) return;
-  const coins=[['BTC','bitcoin'],['ETH','ethereum'],['SOL','solana'],['BNB','binancecoin']];
+  const coins=[['BTC','bitcoin'],['ETH','ethereum'],['SOL','solana'],['BNB','binancecoin'],['XRP','ripple'],['ADA','cardano']];
   let html='';
   coins.forEach(([sym,id])=>{
     const p=livePrices[sym]||livePrices[id];
-    if(!p){html+=`<div class="market-card"><div><div class="market-name">${sym}</div><div class="market-sub mono">${lang==='de'?'Krypto':'Crypto'}</div></div><div class="market-price" style="color:var(--muted);">—</div></div>`;return;}
+    if(!p){html+=`<div class="market-card"><div><div class="market-name">${sym}</div><div class="market-sub mono">${lang==='de'?'Krypto':'Crypto'}</div></div><div class="market-price" style="color:var(--muted);">⏳</div></div>`;return;}
     const chg=p.change24h||0;
     html+=`<div class="market-card"><div><div class="market-name">${sym}</div><div class="market-sub mono">${lang==='de'?'Live · Krypto':'Live · Crypto'}</div></div><div><div class="market-price">${fmtShort(p.eur)}</div><div class="chg-badge ${chg>=0?'chg-pos':'chg-neg'}">${chg>=0?'+':''}${chg.toFixed(2)}%</div></div></div>`;
   });

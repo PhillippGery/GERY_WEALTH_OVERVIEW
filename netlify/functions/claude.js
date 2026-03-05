@@ -53,7 +53,7 @@ exports.handler = async function(event, context) {
   try {
     // ── CLAUDE (Anthropic) ──────────────────────────────────────────────────
     if (provider === 'claude') {
-      const model = body.model || 'claude-sonnet-4-20250514';
+      const model = body.model || 'claude-haiku-4-5-20251001';
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -130,8 +130,8 @@ exports.handler = async function(event, context) {
           : [{ text: m.content }],
       }));
 
-      // Use v1beta for gemini-2.x models, v1 for gemini-1.x
-      const apiVersion = model.startsWith('gemini-2') ? 'v1beta' : 'v1beta';
+      // v1beta supports all current Gemini models
+      const apiVersion = 'v1beta';
       const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`;
       const response = await fetch(url, {
         method: 'POST',
