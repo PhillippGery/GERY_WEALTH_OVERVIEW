@@ -110,7 +110,7 @@ exports.handler = async function(event, context) {
 
     // ── GEMINI (Google) ─────────────────────────────────────────────────────
     if (provider === 'gemini') {
-      const model = body.model || 'gemini-1.5-flash';
+      const model = body.model || 'gemini-2.0-flash';
       // Convert Anthropic-style messages to Gemini format
       const geminiContents = body.messages.map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',
@@ -130,7 +130,9 @@ exports.handler = async function(event, context) {
           : [{ text: m.content }],
       }));
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      // Use v1beta for gemini-2.x models, v1 for gemini-1.x
+      const apiVersion = model.startsWith('gemini-2') ? 'v1beta' : 'v1beta';
+      const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
