@@ -1014,6 +1014,10 @@ function isDuplicate(asset, date, qty, buyPrice) {
     Math.abs(t.buyPrice - buyPrice) < 0.01
   );
 }
+function isDuplicateByISIN(isin, qty) {
+  if (!isin) return false;
+  return trades.some(t => t.isin && t.isin === isin && Math.abs(t.qty - qty) < 0.000001);
+}
 
 // ═══════════════════════════════════════════════════
 //  TRADES
@@ -1484,53 +1488,134 @@ function importAllParsed() {
 }
 
 // ═══════════════════════════════════════════════════
-//  PDF IMPORT (AI)
+//  PDF IMPORT (AI) — handles Depotauszug (portfolio snapshot) format
 // ═══════════════════════════════════════════════════
 async function handlePDFUpload(event) {
   const file = event.target.files[0]; if (!file) return;
   const result = document.getElementById('pdf-parse-result');
   result.style.display='block';
-  result.innerHTML=`<div style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:12px;">⏳ ${lang==='de'?'PDF wird verarbeitet...':'Processing PDF...'}</div>`;
+  result.innerHTML=`<div style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:12px;">⏳ ${lang==='de'?'PDF wird analysiert — bitte warten...':'Analysing PDF — please wait...'}</div>`;
   const cfgPDF = getAIConfig();
-  if (!cfgPDF.apiKey) { result.innerHTML=`<div style="color:var(--red);font-size:12px;">${lang==='de'?'⚙ Bitte zuerst den API-Key in den KI-Einstellungen eingeben.':'⚙ Please enter your API key in AI Settings first.'}</div>`; return; }
-  const reader = new FileReader();
-  reader.onload = async ev => {
+  if (!cfgPDF.apiKey) {
+    result.innerHTML=`<div style="color:var(--red);font-size:12px;">${lang==='de'?'⚙ Bitte zuerst den API-Key in den KI-Einstellungen eingeben.':'⚙ Please enter your API key in AI Settings first.'}</div>`;
+    return;
+  }
+  const fileReader = new FileReader();
+  fileReader.onload = async ev => {
     const b64 = ev.target.result.split(',')[1];
     try {
+      const prompt = `You are parsing a broker depot statement (Depotauszug / Portfolio Overview).
+This is a SNAPSHOT of current holdings, NOT a list of individual purchase transactions.
+The price shown is the CURRENT market price, not the original buy price.
+
+Extract EVERY position. For each position return:
+- asset: Short recognisable ticker/symbol (e.g. "NVDA", "AAPL", "BAYER", "SP500-ETF", "MSCI-WORLD")
+- fullName: Full security name exactly as shown in the PDF
+- isin: ISIN code (e.g. "US67066G1040") — always include this
+- type: "stock" | "etf" | "crypto"
+  ETF indicators: name contains ETF, iShares, iShs, SPDR, Invesco, Xtr., UCITS, ETC, Platin, Gold, Silber
+  ISIN starting with IE = almost always ETF
+- platform: Broker name detected from the PDF (e.g. "Trade Republic")
+- qty: Number of units/shares (decimal allowed)
+- currentPrice: Current price per unit in EUR (column "KURS PRO STÜCK" or similar)
+- date: Statement date in YYYY-MM-DD format
+
+Return ONLY valid JSON, no markdown:
+{"broker":"Trade Republic","date":"2026-03-04","trades":[{"asset":"NVDA","fullName":"NVIDIA Corp.","isin":"US67066G1040","type":"stock","platform":"Trade Republic","qty":4.0,"currentPrice":156.92,"date":"2026-03-04"}]}`;
+
       const res = await fetch('/api/claude',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
+        method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          provider:cfgPDF.provider, apiKey:cfgPDF.apiKey, model:cfgPDF.model, max_tokens:2000,
-          messages:[{role:'user',content:[
-            {type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},
-            {type:'text',text:`Extract ALL investment transactions from this broker statement PDF (Bison, TradeRepublik, or similar). Return ONLY valid JSON:\n{"trades":[{"asset":"BTC","type":"crypto","platform":"Bison","qty":0.05,"buyPrice":28500,"date":"2024-03-15"}]}\nRules: type = crypto/stock/etf, date = YYYY-MM-DD`}
+          provider:cfgPDF.provider, apiKey:cfgPDF.apiKey, model:cfgPDF.model, max_tokens:4000,
+          messages:[{role:'user', content:[
+            {type:'document', source:{type:'base64', media_type:'application/pdf', data:b64}},
+            {type:'text', text:prompt}
           ]}]
         })
       });
       const data = await res.json();
+      if (data.error) throw new Error(typeof data.error==='object'?(data.error.message||JSON.stringify(data.error)):data.error);
       const raw = data.content.map(c=>c.text||'').join('');
-      const parsed = JSON.parse(raw.replace(/```json|```/g,'').trim());
+      const parsed = JSON.parse(raw.replace(/```json\n?|```/g,'').trim());
       if (!parsed.trades?.length) {
-        result.innerHTML=`<div style="color:var(--red);font-size:12px;">${lang==='de'?'Keine Transaktionen im PDF gefunden.':'No transactions found in PDF.'}</div>`;
+        result.innerHTML=`<div style="color:var(--red);font-size:12px;">${lang==='de'?'❌ Keine Positionen im PDF gefunden.':'❌ No positions found in PDF.'}</div>`;
         return;
       }
-      let added=0, skipped=0;
-      parsed.trades.forEach((tr,i) => {
-        if (isDuplicate(tr.asset, tr.date, tr.qty, tr.buyPrice)) { skipped++; return; }
-        const liveP = tr.type==='crypto' ? getLivePrice(tr.asset) : null;
-        trades.push({id:Date.now()+i, asset:tr.asset, type:tr.type, platform:tr.platform||'Other', qty:tr.qty, buyPrice:tr.buyPrice, currentPrice:liveP?.eur||tr.buyPrice, date:tr.date});
-        added++;
+
+      // Duplicate detection: prefer ISIN match, fall back to asset+qty
+      const newTrades=[], dupTrades=[];
+      parsed.trades.forEach(tr => {
+        const dup = isDuplicateByISIN(tr.isin, tr.qty) ||
+                    isDuplicate(tr.asset, tr.date, tr.qty, tr.currentPrice||0);
+        (dup ? dupTrades : newTrades).push(tr);
       });
-      saveAll(); fetchLivePrices(); renderAll();
-      addLog(`PDF: +${added}`);
-      result.innerHTML=`<div style="color:var(--green);font-size:12px;font-family:'JetBrains Mono',monospace;">✓ ${added} ${t('imported')}${skipped?`, ${skipped} ${lang==='de'?'Duplikate':'duplicates'}`:''}</div>`;
-      setTimeout(()=>closeModal('import-modal'),1500);
+      window._pdfParsed = {broker:parsed.broker, date:parsed.date, newTrades, dupTrades};
+
+      // Show preview
+      let html = `<div style="font-family:'JetBrains Mono',monospace;font-size:12px;">`;
+      html += `<div style="color:var(--accent);font-size:13px;margin-bottom:10px;"><strong>📄 ${parsed.broker||'Broker'}</strong> · ${parsed.date||''} · ${parsed.trades.length} ${lang==='de'?'Positionen':'positions'}</div>`;
+
+      if (dupTrades.length) {
+        html += `<div style="color:var(--muted);margin-bottom:4px;">⏭ ${dupTrades.length} ${lang==='de'?'bereits im Portfolio (ISIN-Duplikat):':'already in portfolio (ISIN duplicate):'}</div>`;
+        html += `<div style="color:var(--muted);font-size:10px;margin-bottom:10px;line-height:1.6;">${dupTrades.map(t=>`${t.asset} <span style="color:var(--border3)">${t.isin||''}</span>`).join(' · ')}</div>`;
+      }
+
+      if (newTrades.length) {
+        html += `<div style="color:var(--green);margin-bottom:6px;">✓ ${newTrades.length} ${lang==='de'?'neue Positionen:':'new positions:'}</div>`;
+        html += `<div style="max-height:220px;overflow-y:auto;margin-bottom:8px;">`;
+        html += newTrades.map(tr=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);">
+            <div>
+              <strong style="color:var(--text);">${tr.asset}</strong>
+              <span style="color:var(--muted);font-size:10px;margin-left:6px;">${tr.fullName||''}</span><br>
+              <span style="color:var(--muted);font-size:10px;">${tr.isin||''} · <span class="tag tag-${tr.type||'stock'}" style="font-size:9px;">${tr.type||'stock'}</span></span>
+            </div>
+            <div style="text-align:right;font-size:11px;">
+              <div style="color:var(--muted);">${tr.qty} Stk.</div>
+              <div style="color:var(--accent);">€${(tr.currentPrice||0).toFixed(2)}</div>
+            </div>
+          </div>`).join('');
+        html += `</div>`;
+        html += `<div style="color:var(--yellow);font-size:10px;margin-bottom:10px;padding:6px 8px;background:#e8a02015;border:1px solid #e8a02030;border-radius:2px;">`;
+        html += `⚠ ${lang==='de'?'Einstandspreis unbekannt (Depotauszug enthält keine Kaufpreise). Der aktuelle Kurs wird als Platzhalter gesetzt — bitte manuell anpassen.':'Buy price unknown (depot overview has no purchase prices). Current price used as placeholder — please edit manually.'}`;
+        html += `</div>`;
+        html += `<button class="btn-accent" style="width:100%;" onclick="confirmPDFImport()">✓ ${lang==='de'?`${newTrades.length} Positionen importieren`:`Import ${newTrades.length} positions`}</button>`;
+      } else {
+        html += `<div style="color:var(--green);padding:10px 0;">✓ ${lang==='de'?'Alle Positionen bereits im Portfolio vorhanden.':'All positions already exist in portfolio.'}</div>`;
+      }
+      html += '</div>';
+      result.innerHTML = html;
+
     } catch(e) {
-      result.innerHTML=`<div style="color:var(--red);font-size:12px;">Error: ${e.message}</div>`;
+      result.innerHTML=`<div style="color:var(--red);font-size:12px;">❌ ${e.message}<br><span style="color:var(--muted);font-size:10px;">${lang==='de'?'Tipp: Prüfe den API-Key in den KI-Einstellungen.':'Tip: Check your API key in AI Settings.'}</span></div>`;
     }
   };
-  reader.readAsDataURL(file);
+  fileReader.readAsDataURL(file);
+}
+
+function confirmPDFImport() {
+  const p = window._pdfParsed; if (!p) return;
+  let added = 0;
+  p.newTrades.forEach((tr, i) => {
+    const price = parseFloat(tr.currentPrice) || 0;
+    const liveP = tr.type==='crypto' ? getLivePrice(tr.asset) : null;
+    trades.push({
+      id: Date.now()+i,
+      asset: tr.asset.toUpperCase(),
+      isin: tr.isin || '',
+      type: tr.type || 'stock',
+      platform: tr.platform || p.broker || 'Trade Republic',
+      qty: parseFloat(tr.qty) || 0,
+      buyPrice: price,          // placeholder — user should update
+      currentPrice: liveP?.eur || price,
+      date: tr.date || p.date,
+    });
+    added++;
+  });
+  saveAll(); fetchLivePrices(); renderAll();
+  addLog(`PDF Import: +${added} (${p.broker||'broker'})`);
+  toast(`✓ ${added} ${lang==='de'?'Positionen importiert':'positions imported'}`, 'green');
+  setTimeout(()=>closeModal('import-modal'), 1800);
 }
 
 // ═══════════════════════════════════════════════════
