@@ -11,7 +11,7 @@
     # microphone=self allows the Web Speech API voice input feature
     Permissions-Policy = "camera=(), microphone=(self), geolocation=()"
     # connect-src includes the Netlify function proxy (which forwards to Claude/OpenAI/Gemini server-side)
-    Content-Security-Policy = "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://api.coingecko.com; connect-src 'self' https://api.coingecko.com /.netlify/functions/;"
+    Content-Security-Policy = "default-src 'self' 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com https://api.coingecko.com; img-src 'self' data: https:; connect-src 'self' https://api.coingecko.com /.netlify/functions/;"
 
 [[redirects]]
   from = "/api/claude"

@@ -481,9 +481,9 @@ tr:hover td{background:var(--surface2);}
         <div class="ig">
           <label data-de="Modell" data-en="Model">Modell</label>
           <select id="ai-model-select" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:11px 13px;font-family:'JetBrains Mono',monospace;font-size:13px;outline:none;border-radius:2px;">
-            <option value="claude-sonnet-4-20250514">claude-sonnet-4 (empfohlen)</option>
-            <option value="claude-opus-4-5-20251101">claude-opus-4.5 (leistungsstark)</option>
-            <option value="claude-haiku-4-5-20251001">claude-haiku-4.5 (schnell & günstig)</option>
+            <option value="claude-haiku-4-5-20251001">claude-haiku-4.5 — schnell &amp; günstig ★</option>
+            <option value="claude-sonnet-4-5-20250929">claude-sonnet-4.5 — empfohlen</option>
+            <option value="claude-opus-4-5-20251101">claude-opus-4.5 — leistungsstark</option>
           </select>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
@@ -1192,8 +1192,8 @@ function importCSV(e) {
 //  AI SETTINGS — provider, key, model management
 // ═══════════════════════════════════════════════════
 const AI_PROVIDER_MODELS = {
-  claude:  ['claude-sonnet-4-20250514','claude-opus-4-5-20251101','claude-haiku-4-5-20251001'],
-  openai:  ['gpt-4o','gpt-4o-mini','gpt-4-turbo'],
+  claude:  ['claude-haiku-4-5-20251001','claude-sonnet-4-5-20250929','claude-opus-4-5-20251101'],
+  openai:  ['gpt-4o-mini','gpt-4o','gpt-4-turbo'],
   gemini:  ['gemini-1.5-flash','gemini-1.5-pro','gemini-2.0-flash'],
 };
 
@@ -1201,7 +1201,7 @@ function getAIConfig() {
   return {
     provider: localStorage.getItem('gery_ai_provider') || 'claude',
     apiKey:   localStorage.getItem('gery_ai_key')      || '',
-    model:    localStorage.getItem('gery_ai_model')    || 'claude-sonnet-4-20250514',
+    model:    localStorage.getItem('gery_ai_model')    || 'claude-haiku-4-5-20251001',
   };
 }
 
@@ -1252,12 +1252,15 @@ async function testAIConnection() {
       body:JSON.stringify({provider:cfg.provider,apiKey:cfg.apiKey,model:cfg.model,max_tokens:30,
         messages:[{role:'user',content:'Reply with exactly: OK'}]})});
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    if (data.error) throw new Error(typeof data.error === 'object' ? (data.error.message || JSON.stringify(data.error)) : data.error);
+    // check content exists
+    if (!data.content?.[0]?.text) throw new Error('Unexpected response format: ' + JSON.stringify(data));
     result.style.color='var(--green)';
-    result.textContent=`✓ ${cfg.provider.toUpperCase()} (${cfg.model}) — ${lang==='de'?'Verbindung erfolgreich!':'Connection successful!'}`;
+    result.textContent=`✓ ${cfg.provider.toUpperCase()} · ${cfg.model} — ${lang==='de'?'Verbindung erfolgreich!':'Connection successful!'}`;
   } catch(e) {
     result.style.color='var(--red)';
-    result.textContent=`❌ ${e.message}`;
+    // Show full error detail so the user can see exactly what went wrong
+    result.innerHTML=`❌ ${e.message}<br><span style="font-size:10px;color:var(--muted);">${lang==='de'?'Tipp: Überprüfe API-Key und Modell in den Einstellungen.':'Tip: Check your API key and model in Settings.'}</span>`;
   }
 }
 
