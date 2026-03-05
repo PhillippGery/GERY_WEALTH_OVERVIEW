@@ -41,6 +41,48 @@ exports.handler = async function(event, context) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON body' }) };
   }
 
+  // ── STOCK PRICES (Yahoo Finance proxy — no API key needed) ──────────────
+  if (body.action === 'stock-price') {
+    const symbols = (body.symbols || []).join(',');
+    if (!symbols) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No symbols' }) };
+    try {
+      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}&fields=regularMarketPrice,regularMarketChangePercent,shortName,currency,regularMarketPreviousClose`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
+      const data = await res.json();
+      const quotes = data.quoteResponse?.result || [];
+      const out = {};
+      quotes.forEach(q => {
+        out[q.symbol] = {
+          price: q.regularMarketPrice,
+          change24h: q.regularMarketChangePercent,
+          name: q.shortName,
+          currency: q.currency,
+          prev: q.regularMarketPreviousClose,
+        };
+      });
+      return { statusCode: 200, headers, body: JSON.stringify(out) };
+    } catch(e) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+    }
+  }
+
+  // ── STOCK SEARCH (Yahoo Finance ticker lookup by ISIN / name) ───────────
+  if (body.action === 'stock-search') {
+    const q = body.query || '';
+    if (!q) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No query' }) };
+    try {
+      const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=6&newsCount=0`;
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } });
+      const data = await res.json();
+      const results = (data.quotes || [])
+        .filter(q => q.quoteType === 'EQUITY' || q.quoteType === 'ETF' || q.quoteType === 'MUTUALFUND')
+        .map(q => ({ symbol: q.symbol, name: q.shortname || q.longname || '', type: q.typeDisp || q.quoteType, exchange: q.exchDisp || '' }));
+      return { statusCode: 200, headers, body: JSON.stringify({ results }) };
+    } catch(e) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) };
+    }
+  }
+
   const provider = (body.provider || 'claude').toLowerCase();
   // User-supplied key takes priority; fall back to env variable
   const apiKey =
