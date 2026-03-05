@@ -15,6 +15,15 @@ exports.handler = async function(event, context) {
     };
   }
 
+  // ── LIST MODELS (GET) — used by Auto-detect in the browser ──────────────
+  if (event.httpMethod === 'GET') {
+    const apiKey = event.queryStringParameters?.apiKey;
+    if (!apiKey) return { statusCode: 400, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'No apiKey' }) };
+    const res  = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+    const data = await res.json();
+    return { statusCode: res.status, headers: { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' }, body: JSON.stringify(data) };
+  }
+
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }

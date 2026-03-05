@@ -1346,7 +1346,8 @@ async function autoDetectModels() {
   result.textContent= lang==='de'?'🔍 Verfügbare Gemini-Modelle werden erkannt...':'🔍 Detecting available Gemini models...';
 
   try {
-    const res  = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+    // Route through Netlify proxy to avoid CORS issues in the browser
+    const res  = await fetch(`/api/claude?apiKey=${encodeURIComponent(key)}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error?.message || 'API error ' + res.status);
 
