@@ -110,7 +110,7 @@ exports.handler = async function(event, context) {
 
     // ── GEMINI (Google) ─────────────────────────────────────────────────────
     if (provider === 'gemini') {
-      const model = body.model || 'gemini-2.0-flash-lite';
+      const model = body.model || 'gemini-1.5-flash';
       // Convert Anthropic-style messages to Gemini format
       const geminiContents = body.messages.map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',

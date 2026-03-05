@@ -484,6 +484,7 @@ tr:hover td{background:var(--surface2);}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
           <button class="btn-accent" onclick="saveAISettings()" data-de="Speichern →" data-en="Save →">Speichern →</button>
           <button class="btn-secondary" onclick="testAIConnection()" data-de="Verbindung testen" data-en="Test Connection">Verbindung testen</button>
+          <button class="btn-secondary" onclick="autoDetectModels()" id="btn-autodetect" data-de="🔍 Modelle erkennen" data-en="🔍 Auto-detect Models">🔍 Modelle erkennen</button>
           <button class="btn-danger" onclick="clearAISettings()" data-de="Key löschen" data-en="Clear Key">Key löschen</button>
         </div>
         <div id="ai-test-result" style="display:none;margin-top:12px;padding:10px;font-size:12px;font-family:'JetBrains Mono',monospace;border-radius:2px;"></div>
@@ -1190,7 +1191,7 @@ function importCSV(e) {
 const AI_PROVIDER_MODELS = {
   claude:  ['claude-haiku-4-5-20251001','claude-sonnet-4-5-20250929','claude-opus-4-5-20251101'],
   openai:  ['gpt-4o-mini','gpt-4o','gpt-4-turbo'],
-  gemini:  ['gemini-2.0-flash-lite','gemini-1.5-flash','gemini-1.5-flash-latest'],
+  gemini:  ['gemini-1.5-flash','gemini-1.5-flash-latest','gemini-2.0-flash-lite','gemini-2.0-flash'],
 };
 
 function getAIConfig() {
@@ -1251,35 +1252,55 @@ function toggleApiKeyVisibility() {
   btn.textContent = show?'🙈':'👁';
 }
 
+async function _tryModel(provider, apiKey, model) {
+  const res = await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({provider,apiKey,model,max_tokens:30,
+      messages:[{role:'user',content:'Reply with exactly: OK'}]})});
+  const data = await res.json();
+  if (data.error) throw new Error(typeof data.error==='object'?(data.error.message||JSON.stringify(data.error)):data.error);
+  if (!data.content?.[0]?.text) throw new Error('Unexpected response: '+JSON.stringify(data));
+  return data;
+}
+
 async function testAIConnection() {
-  const cfg = getAIConfig();
+  const cfg    = getAIConfig();
   const result = document.getElementById('ai-test-result');
-  result.style.display='block';
-  result.style.background='var(--surface2)';
-  result.style.color='var(--muted)';
-  result.textContent=`⏳ ${lang==='de'?'Teste Verbindung...':'Testing connection...'}`;
-  if (!cfg.apiKey) { result.style.color='var(--red)'; result.textContent=lang==='de'?'❌ Kein API-Key gespeichert. Bitte zuerst speichern.':'❌ No API key saved. Please save first.'; return; }
-  try {
-    const res = await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({provider:cfg.provider,apiKey:cfg.apiKey,model:cfg.model,max_tokens:30,
-        messages:[{role:'user',content:'Reply with exactly: OK'}]})});
-    const data = await res.json();
-    if (data.error) throw new Error(typeof data.error === 'object' ? (data.error.message || JSON.stringify(data.error)) : data.error);
-    // check content exists
-    if (!data.content?.[0]?.text) throw new Error('Unexpected response format: ' + JSON.stringify(data));
-    result.style.color='var(--green)';
-    result.textContent=`✓ ${cfg.provider.toUpperCase()} · ${cfg.model} — ${lang==='de'?'Verbindung erfolgreich!':'Connection successful!'}`;
-  } catch(e) {
-    result.style.color='var(--red)';
-    const isGemini = cfg.provider === 'gemini';
-    const isQuota  = e.message.toLowerCase().includes('quota') || e.message.includes('limit');
-    const tip = isGemini && isQuota
-      ? (lang==='de'
-          ? '⚠ Gemini-Kontingent erschöpft. Stelle sicher, dass dein Key von <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> stammt (nicht Google Cloud Console).'
-          : '⚠ Gemini quota exceeded. Make sure your key is from <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> (not Google Cloud Console).')
-      : (lang==='de'?'Tipp: Überprüfe API-Key und Modell in den Einstellungen.':'Tip: Check your API key and model in Settings.');
-    result.innerHTML=`❌ ${e.message}<br><span style="font-size:10px;color:var(--muted);">${tip}</span>`;
+  const modelSel = document.getElementById('ai-model-select');
+  result.style.display='block'; result.style.background='var(--surface2)'; result.style.color='var(--muted)';
+  if (!cfg.apiKey) { result.style.color='var(--red)'; result.textContent=lang==='de'?'❌ Kein API-Key. Bitte zuerst speichern.':'❌ No API key. Please save first.'; return; }
+
+  // For Gemini: auto-try all known models until one works
+  const modelsToTry = cfg.provider==='gemini'
+    ? [cfg.model, ...AI_PROVIDER_MODELS.gemini].filter((v,i,a)=>a.indexOf(v)===i)
+    : [cfg.model];
+
+  let lastError='';
+  for (const model of modelsToTry) {
+    result.textContent=`⏳ ${lang==='de'?'Teste':'Testing'} ${model}...`;
+    try {
+      await _tryModel(cfg.provider, cfg.apiKey, model);
+      // ✓ this model works — save it
+      localStorage.setItem('gery_ai_model', model);
+      if (modelSel) modelSel.value = model;
+      result.style.color='var(--green)';
+      result.textContent=`✓ ${cfg.provider.toUpperCase()} · ${model} — ${lang==='de'?'Verbindung erfolgreich! Modell gespeichert.':'Connection successful! Model saved.'}`;
+      return;
+    } catch(e) {
+      lastError=e.message;
+      const deprecated = e.message.includes('no longer available') || e.message.includes('not found');
+      if (!deprecated) break; // non-model error (bad key, quota) — no point trying more models
+    }
   }
+
+  // All models failed
+  result.style.color='var(--red)';
+  const isQuota = lastError.toLowerCase().includes('quota') || lastError.includes('limit:');
+  const tip = cfg.provider==='gemini' && isQuota
+    ? (lang==='de'
+        ? '⚠ Kein Kontingent. Key muss von <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> stammen (nicht Google Cloud Console). Klicke dann auf 🔍 Modelle erkennen.'
+        : '⚠ No quota. Key must be from <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue);">aistudio.google.com</a> (not Google Cloud Console). Then click 🔍 Auto-detect Models.')
+    : (lang==='de'?'Tipp: API-Key überprüfen.':'Tip: Check your API key.');
+  result.innerHTML=`❌ ${lastError}<br><span style="font-size:10px;color:var(--muted);">${tip}</span>`;
 }
 
 function loadAISettingsUI() {
@@ -1292,6 +1313,64 @@ function loadAISettingsUI() {
   onProviderChange();
   modelSel.value = cfg.model;
   if (cfg.apiKey) keyInp.value = cfg.apiKey;
+}
+
+// ═══════════════════════════════════════════════════
+//  AUTO-DETECT GEMINI MODELS
+// ═══════════════════════════════════════════════════
+async function autoDetectModels() {
+  const result  = document.getElementById('ai-test-result');
+  const keyInp  = document.getElementById('ai-api-key-input');
+  const provSel = document.getElementById('ai-provider-select');
+  const modelSel= document.getElementById('ai-model-select');
+  const btn     = document.getElementById('btn-autodetect');
+  const key     = keyInp.value.trim() || getAIConfig().apiKey;
+
+  result.style.display='block';
+  result.style.background='var(--surface2)';
+  result.style.color='var(--muted)';
+
+  if (provSel.value !== 'gemini') {
+    result.style.color='var(--yellow)';
+    result.textContent= lang==='de'?'⚠ Auto-Detect ist nur für Gemini verfügbar.':'⚠ Auto-detect only works for Gemini.';
+    return;
+  }
+  if (!key) {
+    result.style.color='var(--red)';
+    result.textContent= lang==='de'?'❌ Bitte zuerst den API-Key eingeben.':'❌ Please enter your API key first.';
+    return;
+  }
+
+  btn.textContent='⏳ ...';
+  btn.disabled=true;
+  result.textContent= lang==='de'?'🔍 Verfügbare Gemini-Modelle werden erkannt...':'🔍 Detecting available Gemini models...';
+
+  try {
+    const res  = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'API error ' + res.status);
+
+    const available = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods||[]).includes('generateContent'))
+      .map(m => m.name.replace('models/',''))
+      .filter(n => n.includes('gemini'));
+
+    if (!available.length) throw new Error(lang==='de'?'Keine Gemini-Modelle für diesen Key gefunden.':'No Gemini models found for this key.');
+
+    // Update dropdown with live results
+    AI_PROVIDER_MODELS.gemini = available;
+    modelSel.innerHTML = available.map(m=>`<option value="${m}">${m}</option>`).join('');
+    modelSel.value = available[0];
+
+    result.style.color='var(--green)';
+    result.innerHTML=`✓ ${available.length} Modelle erkannt. <strong>${available[0]}</strong> ausgewählt.<br><span style="font-size:10px;color:var(--muted);">${available.join(' · ')}</span>`;
+  } catch(e) {
+    result.style.color='var(--red)';
+    result.innerHTML=`❌ ${e.message}<br><span style="font-size:10px;color:var(--muted);">${lang==='de'?'Tipp: Stelle sicher, dass der Key von aistudio.google.com stammt.':'Tip: Make sure the key is from aistudio.google.com.'}</span>`;
+  } finally {
+    btn.textContent = lang==='de'?'🔍 Modelle erkennen':'🔍 Auto-detect Models';
+    btn.disabled=false;
+  }
 }
 
 // ═══════════════════════════════════════════════════
