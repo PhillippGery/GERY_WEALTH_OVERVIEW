@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GERY — Vermögensübersicht</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -272,7 +273,7 @@ tr:hover td{background:var(--surface2);}
 <!-- ═══════════ APP ═══════════ -->
 <div id="app">
   <div class="topbar">
-    <div class="topbar-logo">
+    <div class="topbar-logo" onclick="showPage('dashboard', document.querySelector('.nav-btn'))" style="cursor:pointer;" title="Dashboard" onmouseover="this.style.opacity='.75'" onmouseout="this.style.opacity='1'">
       <img id="nav-logo-img" src="" alt="GERY">
       <span class="topbar-logo-text">GERY</span>
     </div>
@@ -351,7 +352,7 @@ tr:hover td{background:var(--surface2);}
     </div>
     <div class="card">
       <div class="card-title"><span data-de="Alle Positionen" data-en="All Positions">Alle Positionen</span><span id="portfolio-count" style="color:var(--muted2);font-size:10px;"></span></div>
-      <div class="table-wrap"><table><thead><tr><th data-de="Asset" data-en="Asset">Asset</th><th data-de="Typ" data-en="Type">Typ</th><th data-de="Menge" data-en="Qty">Menge</th><th data-de="Kaufpreis" data-en="Buy Price">Kaufpreis</th><th data-de="Marktpreis" data-en="Market Price">Marktpreis</th><th data-de="Wert" data-en="Value">Wert</th><th data-de="G&V" data-en="P&L">G&V</th><th data-de="Plattform" data-en="Platform">Plattform</th><th></th></tr></thead><tbody id="portfolio-body"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th style="width:18px;"></th><th data-de="Asset" data-en="Asset">Asset</th><th data-de="Menge" data-en="Qty">Menge</th><th data-de="Ø Kaufpreis" data-en="Avg Buy">Ø Kauf</th><th data-de="Marktpreis" data-en="Price">Preis</th><th data-de="Wert" data-en="Value">Wert</th><th data-de="G&V" data-en="P&L">G&V</th><th title="Geschätzte Steuerlast bei sofortigem Verkauf (§23 EStG / Abgeltungssteuer)" data-de="Est. Steuer ⓘ" data-en="Est. Tax ⓘ">Est. Steuer</th><th></th></tr></thead><tbody id="portfolio-body"></tbody></table></div>
     </div>
   </div>
 
@@ -668,6 +669,29 @@ tr:hover td{background:var(--surface2);}
   </div>
 </div>
 
+<!-- ═══ EDIT TRADE MODAL ═══ -->
+<div class="modal-overlay" id="edit-trade-modal">
+  <div class="modal">
+    <div class="modal-title serif" data-de="Position bearbeiten" data-en="Edit Position">Position bearbeiten</div>
+    <div class="modal-grid">
+      <div class="ig full"><label data-de="Asset-Name" data-en="Asset Name">Asset-Name</label><input type="text" id="et-asset" placeholder="BTC, ETH, NVDA..."></div>
+      <div class="ig"><label data-de="Typ" data-en="Type">Typ</label><select id="et-type" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:11px 13px;font-family:'JetBrains Mono',monospace;font-size:13px;outline:none;border-radius:2px;"><option value="crypto">Krypto</option><option value="stock">Aktie</option><option value="etf">ETF</option></select></div>
+      <div class="ig"><label data-de="Plattform" data-en="Platform">Plattform</label><input type="text" id="et-platform" placeholder="Bison, Trade Republic..."></div>
+      <div class="ig"><label data-de="Menge" data-en="Quantity">Menge</label><input type="number" id="et-qty" step="any" placeholder="0.05"></div>
+      <div class="ig"><label data-de="Kaufpreis (€)" data-en="Buy Price (€)">Kaufpreis (€)</label><input type="number" id="et-buy" step="any" placeholder="26000"></div>
+      <div class="ig full" style="border:1px solid var(--accent);padding:10px;border-radius:2px;background:var(--accent-dim);">
+        <label style="color:var(--accent);font-weight:600;" data-de="⭐ Kaufdatum (für Steuer-Haltefrist)" data-en="⭐ Buy Date (for tax holding period)">⭐ Kaufdatum</label>
+        <input type="date" id="et-date" style="width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:11px 13px;font-family:'JetBrains Mono',monospace;font-size:13px;outline:none;border-radius:2px;margin-top:6px;">
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;" data-de="Wichtig für Krypto/Edelmetalle: Steuerfreiheit nach 12 Monaten (§23 EStG)" data-en="Important for crypto/metals: tax-free after 12 months (§23 EStG)">Wichtig für Krypto/Edelmetalle: Steuerfreiheit nach 12 Monaten (§23 EStG)</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-accent" onclick="saveEditTrade()" data-de="✓ Speichern" data-en="✓ Save">✓ Speichern</button>
+      <button class="btn-secondary" onclick="closeModal('edit-trade-modal')" data-de="Abbrechen" data-en="Cancel">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ INVITE MODAL ═══ -->
 <div class="modal-overlay" id="invite-modal">
   <div class="modal">
@@ -765,6 +789,7 @@ let loginAttempts = 0;
 let activityLog = [];
 let stockWatchlist = []; // [{ symbol:'NVDA', name:'NVIDIA Corp', addedAt:'...' }]
 let stockPrices    = {}; // { 'NVDA': { price, change24h, name, currency, prev } }
+let pdfImportHistory = []; // [{ broker, date, docType, importedAt }] — fingerprint dedup
 
 function saveAll() {
   localStorage.setItem('gery_users', JSON.stringify(users));
@@ -776,14 +801,16 @@ function saveAll() {
   localStorage.setItem('gery_alerts_'+k, JSON.stringify(priceAlerts));
   localStorage.setItem('gery_log_'+k, JSON.stringify(activityLog.slice(-50)));
   localStorage.setItem('gery_stockwl_'+k, JSON.stringify(stockWatchlist));
+  localStorage.setItem('gery_pdfhist_'+k, JSON.stringify(pdfImportHistory));
 }
 function loadUserData(email) {
-  trades         = JSON.parse(localStorage.getItem('gery_trades_'+email) || '[]');
-  analyses       = JSON.parse(localStorage.getItem('gery_analyses_'+email) || '[]');
-  budgets        = JSON.parse(localStorage.getItem('gery_budget_'+email) || '{}');
-  priceAlerts    = JSON.parse(localStorage.getItem('gery_alerts_'+email) || '[]');
-  activityLog    = JSON.parse(localStorage.getItem('gery_log_'+email) || '[]');
-  stockWatchlist = JSON.parse(localStorage.getItem('gery_stockwl_'+email) || '[]');
+  trades            = JSON.parse(localStorage.getItem('gery_trades_'+email) || '[]');
+  analyses          = JSON.parse(localStorage.getItem('gery_analyses_'+email) || '[]');
+  budgets           = JSON.parse(localStorage.getItem('gery_budget_'+email) || '{}');
+  priceAlerts       = JSON.parse(localStorage.getItem('gery_alerts_'+email) || '[]');
+  activityLog       = JSON.parse(localStorage.getItem('gery_log_'+email) || '[]');
+  stockWatchlist    = JSON.parse(localStorage.getItem('gery_stockwl_'+email) || '[]');
+  pdfImportHistory  = JSON.parse(localStorage.getItem('gery_pdfhist_'+email) || '[]');
 }
 function addLog(msg) {
   const now = new Date().toLocaleString(lang==='de'?'de-DE':'en-GB',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});
@@ -1040,9 +1067,10 @@ function isDuplicate(asset, date, qty, buyPrice) {
     Math.abs(t.buyPrice - buyPrice) < 0.01
   );
 }
-function isDuplicateByISIN(isin, qty) {
+function isDuplicateByISIN(isin) {
+  // ISIN-only check — qty may differ after partial sells, so don't compare qty
   if (!isin) return false;
-  return trades.some(t => t.isin && t.isin === isin && Math.abs(t.qty - qty) < 0.000001);
+  return trades.some(t => t.isin && t.isin === isin);
 }
 
 // ═══════════════════════════════════════════════════
@@ -1128,39 +1156,53 @@ function parseTRCSV(lines, sep) {
   return trades_out.length ? trades_out : null;
 }
 
-// Detect and parse Bison CSV export
-// Bison columns (semicolon, German): Datum;Typ;Kryptowährung;Menge;Kurs (EUR);Betrag (EUR);Gebühren (EUR)
+// Parse Bison "transactionhistory.csv" export
+// Real columns (semicolon): Transaction ID; Transaction type; Currency; Asset; Eur (amount); Asset (amount); Asset (market price); Fee; Date (UTC ...)
+// Filters: only Buy + Deposit-with-Asset. Uses Transaction ID for dedup.
 function parseBisonCSV(lines, sep) {
   const header = lines[0].toLowerCase();
-  if (!(header.includes('kryptowährung') || header.includes('cryptocurrency') || header.includes('bison'))) return null;
+  // Detect by "transaction id" or "transaction type" in header
+  if (!(header.includes('transaction id') || header.includes('transaction type'))) return null;
+  const h = lines[0].split(sep).map(x=>x.replace(/^"|"$/g,'').trim().toLowerCase());
+  const col = (p, k) => { const idx = h.findIndex(c=>c.includes(k)); return idx>=0?p[idx]?.replace(/^"|"$/g,'').trim():undefined; };
+
+  const SYMBOL_MAP = {'btc':'BTC','eth':'ETH','sol':'SOL','bnb':'BNB','ada':'ADA','xrp':'XRP',
+    'dot':'DOT','link':'LINK','pol':'POL','matic':'MATIC','avax':'AVAX','mana':'MANA','xtz':'XTZ',
+    'ltc':'LTC','doge':'DOGE','xlm':'XLM','uni':'UNI','atom':'ATOM','algo':'ALGO'};
+
   const trades_out = [];
-  lines.slice(1).forEach((line, i) => {
+  // Track existing transaction IDs to avoid re-importing
+  const existingTxIds = new Set(trades.map(t=>t.txId).filter(Boolean));
+
+  lines.slice(1).forEach(line => {
     if (!line.trim()) return;
-    const p = line.split(sep).map(x => x.replace(/^"|"$/g,'').trim());
-    const h = lines[0].split(sep).map(x=>x.replace(/^"|"$/g,'').trim().toLowerCase());
-    const col = k => { const idx = h.findIndex(c=>c.includes(k)); return idx>=0?p[idx]:undefined; };
+    const p = line.split(sep);
+    const txId   = col(p,'transaction id') || '';
+    const txType = (col(p,'transaction type') || '').toLowerCase();
+    const asset  = col(p,'asset') || '';
+    const eurAmt = parseFloat(col(p,'eur (amount)') || '0') || 0;
+    const assetAmt = parseFloat(col(p,'asset (amount)') || '0') || 0;
+    const mktPrice = parseFloat(col(p,'asset (market price)') || '0') || 0;
+    let rawDate = col(p,'date') || '';
+    // "2024-01-01 14:28:55" → "2024-01-01"
+    if (rawDate.includes(' ')) rawDate = rawDate.split(' ')[0];
+    if (rawDate.includes('T')) rawDate = rawDate.split('T')[0];
 
-    const typ = (col('typ') || col('type') || '').toLowerCase();
-    if (!typ.includes('kauf') && !typ.includes('buy')) return;
+    // Only import Buy transactions, or Deposit with a non-empty asset (crypto deposit)
+    const isBuy     = txType === 'buy';
+    const isDeposit = txType === 'deposit' && asset;
+    if (!isBuy && !isDeposit) return;
+    if (!asset || assetAmt <= 0) return;
+    // Skip already-imported transaction IDs
+    if (txId && existingTxIds.has(txId)) return;
 
-    let rawDate = col('datum') || col('date') || p[0];
-    if (rawDate && rawDate.includes('.')) {
-      const parts = rawDate.split('.');
-      if (parts.length===3) rawDate = `${parts[2].substring(0,4)}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
-    }
-    // handle ISO dates with time: 2024-01-15T10:30:00
-    if (rawDate && rawDate.includes('T')) rawDate = rawDate.split('T')[0];
+    // Normalise symbol
+    const sym = SYMBOL_MAP[asset.toLowerCase()] || asset.toUpperCase();
+    // Use market price if available, else derive from eur/qty
+    const buyPrice = mktPrice > 0 ? mktPrice : (eurAmt > 0 && assetAmt > 0 ? eurAmt/assetAmt : 0);
+    if (!sym || assetAmt <= 0 || buyPrice <= 0) return;
 
-    const cryptoName = col('kryptowährung') || col('cryptocurrency') || col('asset') || p[2];
-    const menge = parseGermanNumber(col('menge') || col('qty') || col('amount') || p[3]);
-    const kurs  = parseGermanNumber(col('kurs') || col('price') || col('preis') || p[4]);
-    if (!cryptoName || isNaN(menge) || menge<=0 || isNaN(kurs) || kurs<=0) return;
-
-    // Map Bison long name to symbol if recognisable
-    const symbolMap = {'bitcoin':'BTC','ethereum':'ETH','litecoin':'LTC','ripple':'XRP','cardano':'ADA','solana':'SOL','dogecoin':'DOGE','stellar':'XLM','polkadot':'DOT','chainlink':'LINK','uniswap':'UNI','avalanche':'AVAX'};
-    const sym = symbolMap[cryptoName.toLowerCase()] || cryptoName.toUpperCase();
-
-    trades_out.push({ date: rawDate, asset: sym, type: 'crypto', qty: menge, buyPrice: kurs, platform: 'Bison' });
+    trades_out.push({ txId, date: rawDate, asset: sym, type: 'crypto', qty: assetAmt, buyPrice, platform: 'Bison' });
   });
   return trades_out.length ? trades_out : null;
 }
@@ -1199,9 +1241,12 @@ function importCSV(e) {
     let added=0, skipped=0;
     parsedTrades.forEach((tr,i) => {
       if (!tr.date||!tr.asset||!tr.qty||!tr.buyPrice) return;
-      if (isDuplicate(tr.asset, tr.date, tr.qty, tr.buyPrice)) { skipped++; return; }
+      // Prefer txId dedup (Bison), fallback to asset+date+qty+price
+      const isDup = (tr.txId && trades.some(t=>t.txId===tr.txId)) ||
+                    (!tr.txId && isDuplicate(tr.asset, tr.date, tr.qty, tr.buyPrice));
+      if (isDup) { skipped++; return; }
       const liveP = tr.type==='crypto'?getLivePrice(tr.asset):null;
-      trades.push({id:Date.now()+i, asset:tr.asset, type:tr.type||'crypto', platform:tr.platform||'CSV', qty:tr.qty, buyPrice:tr.buyPrice, currentPrice:liveP?.eur||tr.currentPrice||tr.buyPrice, date:tr.date});
+      trades.push({id:Date.now()+i, txId:tr.txId||'', asset:tr.asset, type:tr.type||'crypto', platform:tr.platform||'CSV', qty:tr.qty, buyPrice:tr.buyPrice, currentPrice:liveP?.eur||tr.currentPrice||tr.buyPrice, date:tr.date});
       added++;
     });
     saveAll(); renderAll();
@@ -1574,14 +1619,32 @@ Return ONLY valid JSON, no markdown, no explanation:
         return;
       }
 
+      // Bug 3a: PDF fingerprint — warn if same broker+date already imported
+      const fingerprint = `${parsed.broker||'?'}|${parsed.date||'?'}|${parsed.docType||'?'}`;
+      const prevImport = pdfImportHistory.find(h => h.fingerprint === fingerprint);
+      if (prevImport) {
+        const overrideBanner = `<div style="color:var(--yellow);font-size:11px;padding:8px 10px;background:#e8a02015;border:1px solid #e8a02040;border-radius:2px;margin-bottom:10px;">
+          ⚠ ${lang==='de'?`Diese PDF wurde bereits am ${prevImport.importedAt} importiert (${parsed.broker} · ${parsed.date}). Trotzdem fortfahren?`:`This PDF was already imported on ${prevImport.importedAt} (${parsed.broker} · ${parsed.date}). Continue anyway?`}
+          <div style="margin-top:6px;display:flex;gap:6px;">
+            <button class="btn-accent" style="font-size:10px;padding:4px 10px;" onclick="document.getElementById('pdf-fingerprint-warning').style.display='none'">${lang==='de'?'Fortfahren':'Continue'}</button>
+            <button class="btn-secondary" style="font-size:10px;padding:4px 10px;" onclick="document.getElementById('pdf-parse-result').style.display='none'">${lang==='de'?'Abbrechen':'Cancel'}</button>
+          </div>
+        </div>`;
+        result.innerHTML = `<div id="pdf-fingerprint-warning">${overrideBanner}</div>`;
+        result.querySelector('.btn-accent').addEventListener('click', () => {
+          document.getElementById('pdf-fingerprint-warning').style.display='none';
+        });
+        // Still show the rest of the preview after the warning
+      }
+
       // Duplicate detection: prefer ISIN match, fall back to asset+qty
       const newTrades=[], dupTrades=[];
       parsed.trades.forEach(tr => {
-        const dup = isDuplicateByISIN(tr.isin, tr.qty) ||
-                    isDuplicate(tr.asset, tr.date, tr.qty, tr.currentPrice||0);
+        const dup = isDuplicateByISIN(tr.isin) ||
+                    (!tr.isin && isDuplicate(tr.asset, tr.date, tr.qty, tr.currentPrice||0));
         (dup ? dupTrades : newTrades).push(tr);
       });
-      window._pdfParsed = {broker:parsed.broker, date:parsed.date, newTrades, dupTrades};
+      window._pdfParsed = {broker:parsed.broker, date:parsed.date, docType:parsed.docType||'Depotauszug', newTrades, dupTrades};
 
       // Show preview
       const docType = parsed.docType || 'Depotauszug';
@@ -1662,9 +1725,18 @@ function confirmPDFImport() {
     });
     added++;
   });
+  // Save PDF fingerprint to prevent accidental re-import
+  const fp = `${p.broker||'?'}|${p.date||'?'}|${p.docType||'?'}`;
+  if (!pdfImportHistory.find(h=>h.fingerprint===fp)) {
+    pdfImportHistory.push({ fingerprint: fp, broker: p.broker, date: p.date, importedAt: new Date().toISOString().split('T')[0] });
+  }
   saveAll(); fetchLivePrices(); renderAll();
   addLog(`PDF Import: +${added} (${p.broker||'broker'})`);
   toast(`✓ ${added} ${lang==='de'?'Positionen importiert':'positions imported'}`, 'green');
+  // Kaufdatum warning for snapshot documents
+  if (p.docType !== 'Kontoauszug') {
+    setTimeout(()=>toast(lang==='de'?'⚠ Kaufdatum prüfen! Auszugsdatum als Platzhalter — bitte ✏️ Edit nutzen':'⚠ Check buy dates! Statement date used as placeholder — use ✏️ Edit to correct', 'yellow'), 2000);
+  }
   setTimeout(()=>closeModal('import-modal'), 1800);
 }
 
@@ -1908,6 +1980,40 @@ const fmtDate = d => new Date(d).toLocaleDateString(lang==='de'?'de-DE':'en-GB')
 const daysBetween = (d1,d2) => Math.floor((d2-d1)/86400000);
 
 // ═══════════════════════════════════════════════════
+//  EDIT TRADE
+// ═══════════════════════════════════════════════════
+function openEditTrade(id) {
+  const tr = trades.find(t => t.id === id);
+  if (!tr) return;
+  document.getElementById('et-asset').value    = tr.asset || '';
+  document.getElementById('et-type').value     = tr.type || 'crypto';
+  document.getElementById('et-platform').value = tr.platform || '';
+  document.getElementById('et-qty').value      = tr.qty || '';
+  document.getElementById('et-buy').value      = tr.buyPrice || '';
+  document.getElementById('et-date').value     = tr.date || '';
+  document.getElementById('edit-trade-modal').dataset.editId = id;
+  document.getElementById('edit-trade-modal').classList.add('open');
+}
+
+function saveEditTrade() {
+  const id = parseInt(document.getElementById('edit-trade-modal').dataset.editId);
+  const tr = trades.find(t => t.id === id);
+  if (!tr) return;
+  const asset = document.getElementById('et-asset').value.trim().toUpperCase();
+  const date  = document.getElementById('et-date').value;
+  if (!asset || !date) return alert(lang==='de'?'Asset und Kaufdatum sind Pflicht.':'Asset and buy date are required.');
+  tr.asset    = asset;
+  tr.type     = document.getElementById('et-type').value;
+  tr.platform = document.getElementById('et-platform').value.trim();
+  tr.qty      = parseFloat(document.getElementById('et-qty').value) || tr.qty;
+  tr.buyPrice = parseFloat(document.getElementById('et-buy').value) || tr.buyPrice;
+  tr.date     = date;
+  saveAll(); renderAll();
+  closeModal('edit-trade-modal');
+  toast(`✓ ${asset} ${lang==='de'?'aktualisiert':'updated'}`, 'green');
+}
+
+// ═══════════════════════════════════════════════════
 //  STOCK WATCHLIST
 // ═══════════════════════════════════════════════════
 async function fetchStockPrices() {
@@ -2130,28 +2236,129 @@ function renderMarketPrices() {
   el.innerHTML=html;
 }
 
+// ── Tax estimate per group of lots ──
+function toggleLotRows(expandId, headerRow) {
+  const rows = document.querySelectorAll('tr.' + expandId);
+  const arrow = document.getElementById(expandId + '_arrow');
+  const isHidden = rows.length > 0 && rows[0].style.display === 'none';
+  rows.forEach(r => r.style.display = isHidden ? 'table-row' : 'none');
+  if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
+}
+
+function calcGroupTax(lots, currentPrice) {
+  const now = new Date();
+  let taxEur = 0;
+  lots.forEach(tr => {
+    const gain = (currentPrice - tr.buyPrice) * tr.qty;
+    if (gain <= 0) return; // no tax on losses
+    const heldDays = daysBetween(new Date(tr.date), now);
+    if (tr.type === 'crypto' || tr.type === 'metal') {
+      if (heldDays < 365) taxEur += gain * 0.42; // §23 EStG short-term ~42%
+      // else tax-free
+    } else if (tr.type === 'etf') {
+      taxEur += gain * 0.70 * 0.26375; // 30% Teilfreistellung
+    } else {
+      taxEur += gain * 0.26375; // stocks: Abgeltungssteuer
+    }
+  });
+  return Math.max(0, taxEur);
+}
+
 function renderPortfolio() {
-  const tbody=document.getElementById('portfolio-body');
-  const cnt=document.getElementById('portfolio-count');
-  if(!tbody) return;
-  if(cnt) cnt.textContent=trades.length+' '+(lang==='de'?'Positionen':'positions');
-  if(!trades.length){tbody.innerHTML=`<tr><td colspan="9"><div class="empty-state"><div class="icon">📈</div>${t('addFirst')}</div></td></tr>`;return;}
-  tbody.innerHTML=trades.map(tr=>{
-    const val=tr.qty*tr.currentPrice, cost=tr.qty*tr.buyPrice, pl=val-cost, plPct=cost>0?(pl/cost*100):0;
-    const live=tr.type==='crypto'?getLivePrice(tr.asset):null;
-    const liveStr=live?`<span class="live-dot"></span>${fmtShort(live.eur)}`:(tr.type==='crypto'?`<span style="color:var(--muted);">—</span>`:'');
-    return `<tr>
-      <td><strong>${tr.asset}</strong></td>
-      <td><span class="tag tag-${tr.type}">${tr.type}</span></td>
-      <td class="mono-cell">${tr.qty}</td>
-      <td class="mono-cell">${fmt(tr.buyPrice)}</td>
-      <td class="mono-cell">${liveStr||fmt(tr.currentPrice)}</td>
-      <td class="mono-cell">${fmt(val)}</td>
-      <td class="mono-cell ${pl>=0?'pos':'neg'}">${pl>=0?'+':''}${fmt(pl)} (${plPct.toFixed(1)}%)</td>
-      <td style="color:var(--muted);font-size:11px;">${tr.platform}</td>
-      <td><button class="btn-danger" onclick="deleteTrade(${tr.id})">×</button></td>
+  const tbody = document.getElementById('portfolio-body');
+  const cnt   = document.getElementById('portfolio-count');
+  if (!tbody) return;
+  if (!trades.length) {
+    if (cnt) cnt.textContent = '';
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="icon">📈</div>${t('addFirst')}</div></td></tr>`;
+    return;
+  }
+
+  // Group trades by asset
+  const groups = {};
+  trades.forEach(tr => {
+    if (!groups[tr.asset]) groups[tr.asset] = [];
+    groups[tr.asset].push(tr);
+  });
+
+  const now = new Date();
+  let totalPositions = 0, html = '';
+
+  Object.entries(groups).forEach(([asset, lots]) => {
+    totalPositions++;
+    const type = lots[0].type;
+    const live = type === 'crypto' ? getLivePrice(asset) : null;
+    const currentPrice = live ? live.eur : (lots[0].currentPrice || lots[0].buyPrice);
+    const liveStr = live
+      ? `<span class="live-dot"></span>${fmtShort(live.eur)}`
+      : fmtShort(currentPrice);
+
+    // Aggregated numbers
+    const totalQty  = lots.reduce((s, t) => s + t.qty, 0);
+    const totalCost = lots.reduce((s, t) => s + t.qty * t.buyPrice, 0);
+    const avgBuy    = totalCost / totalQty;
+    const totalVal  = totalQty * currentPrice;
+    const pl        = totalVal - totalCost;
+    const plPct     = totalCost > 0 ? (pl / totalCost * 100) : 0;
+    const taxEst    = calcGroupTax(lots, currentPrice);
+
+    // Tax badge: all lots status for crypto
+    let taxBadgeHtml = '';
+    if (type === 'crypto' || type === 'metal') {
+      const freeLots  = lots.filter(t => daysBetween(new Date(t.date), now) >= 365).length;
+      const totalLots = lots.length;
+      taxBadgeHtml = freeLots === totalLots
+        ? `<span style="color:var(--green);font-size:10px;">✓ steuerfrei</span>`
+        : freeLots > 0
+          ? `<span style="color:var(--yellow);font-size:10px;">${freeLots}/${totalLots} frei</span>`
+          : `<span style="color:var(--red);font-size:10px;">§23 steuerpfl.</span>`;
+    }
+
+    const expandId = `lots_${asset.replace(/[^a-z0-9]/gi,'_')}`;
+    const hasMultiLots = lots.length > 1;
+
+    // ── Aggregated group row ──
+    html += `<tr style="cursor:${hasMultiLots?'pointer':'default'}" ${hasMultiLots?`onclick="toggleLotRows('${expandId}', this)"`:''}>
+      <td id="${expandId}_arrow" style="font-size:11px;color:var(--muted);text-align:center;transition:transform .2s;">${hasMultiLots?'▶':''}</td>
+      <td><strong>${asset}</strong> <span class="tag tag-${type}" style="font-size:9px;">${type}</span>${taxBadgeHtml?`<br>${taxBadgeHtml}`:''}</td>
+      <td class="mono-cell">${totalQty % 1 === 0 ? totalQty : totalQty.toFixed(6).replace(/\.?0+$/, '')} <span style="color:var(--muted);font-size:10px;">${hasMultiLots?`(${lots.length} Lots)`:''}</span></td>
+      <td class="mono-cell">${fmtShort(avgBuy)}</td>
+      <td class="mono-cell">${liveStr}</td>
+      <td class="mono-cell">${fmt(totalVal)}</td>
+      <td class="mono-cell ${pl>=0?'pos':'neg'}">${pl>=0?'+':''}${fmt(pl)}<br><span style="font-size:10px;">(${plPct.toFixed(1)}%)</span></td>
+      <td class="mono-cell" style="font-size:11px;">${taxEst > 0 ? `<span style="color:var(--red);">-${fmt(taxEst)}</span>` : `<span style="color:var(--green);">€0</span>`}</td>
+      <td><button class="btn-danger" onclick="event.stopPropagation();openEditTrade(${lots[0].id})" title="${lang==='de'?'Bearbeiten':'Edit'}" style="margin-right:3px;">✏️</button>${lots.length===1?`<button class="btn-danger" onclick="event.stopPropagation();deleteTrade(${lots[0].id})">×</button>`:''}</td>
     </tr>`;
-  }).join('');
+
+    // ── Individual lots (hidden by default, toggled by toggleLotRows) ──
+    if (hasMultiLots) {
+      lots.sort((a,b) => new Date(a.date)-new Date(b.date)).forEach(tr => {
+        const held = daysBetween(new Date(tr.date), now);
+        const taxFree = (type==='crypto'||type==='metal') && held >= 365;
+        const daysLeft = Math.max(0, 365 - held);
+        let statusHtml = '';
+        if (type==='crypto'||type==='metal') {
+          statusHtml = taxFree
+            ? `<span class="tax-badge tax-free" style="font-size:9px;">✓ Steuerfrei</span>`
+            : `<span class="tax-badge tax-liable" style="font-size:9px;">Noch ${daysLeft}d</span>`;
+        }
+        html += `<tr class="${expandId}" style="display:none;background:var(--surface2);font-size:11px;">
+          <td></td>
+          <td style="padding-left:18px;color:var(--muted);">↳ Lot ${fmtDate(tr.date)}</td>
+          <td class="mono-cell" style="font-size:11px;">${tr.qty.toFixed?.(6).replace(/\.?0+$/,'')}</td>
+          <td class="mono-cell" style="font-size:11px;">${fmtShort(tr.buyPrice)}</td>
+          <td></td>
+          <td class="mono-cell" style="font-size:11px;">${fmt(tr.qty*currentPrice)}</td>
+          <td class="mono-cell ${(tr.qty*currentPrice-tr.qty*tr.buyPrice)>=0?'pos':'neg'}" style="font-size:11px;">${(tr.qty*currentPrice-tr.qty*tr.buyPrice)>=0?'+':''}${fmt(tr.qty*currentPrice-tr.qty*tr.buyPrice)}</td>
+          <td>${statusHtml}</td>
+          <td><button class="btn-danger" onclick="openEditTrade(${tr.id})" title="Bearbeiten" style="margin-right:3px;">✏️</button><button class="btn-danger" onclick="deleteTrade(${tr.id})">×</button></td>
+        </tr>`;
+      });
+    }
+  });
+
+  if (cnt) cnt.textContent = totalPositions + ' ' + (lang==='de'?'Assets':'assets') + ' · ' + trades.length + ' Lots';
+  tbody.innerHTML = html;
 }
 
 function renderTaxTimer() {
