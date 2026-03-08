@@ -352,6 +352,7 @@ tr:hover td{background:var(--surface2);}
       <div class="ph-actions">
         <button class="btn-secondary" onclick="exportCSV()" data-de="⬇ CSV Export" data-en="⬇ CSV Export">⬇ CSV Export</button>
         <button class="btn-secondary" onclick="openImportModal()" data-de="📎 Importieren" data-en="📎 Import">📎 Importieren</button>
+        <button class="btn-danger" onclick="confirmDeleteAllPositions()" data-de="🗑 Alle löschen" data-en="🗑 Delete All">🗑 Alle löschen</button>
         <button class="btn-accent" onclick="openAddTrade()" data-de="+ Position" data-en="+ Add Position">+ Position</button>
       </div>
     </div>
@@ -1161,12 +1162,11 @@ function parseTRCSV(lines, sep) {
   return trades_out.length ? trades_out : null;
 }
 
-// Parse Bison "transactionhistory.csv" export
+// Parse Bison "transactionhistory.csv" export — with FIFO sell processing
 // Real columns (semicolon): Transaction ID; Transaction type; Currency; Asset; Eur (amount); Asset (amount); Asset (market price); Fee; Date (UTC ...)
-// Filters: only Buy + Deposit-with-Asset. Uses Transaction ID for dedup.
+// Returns { trades: remainingLots[], realizedGains: [] } or null if not detected.
 function parseBisonCSV(lines, sep) {
   const header = lines[0].toLowerCase();
-  // Detect by "transaction id" or "transaction type" in header
   if (!(header.includes('transaction id') || header.includes('transaction type'))) return null;
   const h = lines[0].split(sep).map(x=>x.replace(/^"|"$/g,'').trim().toLowerCase());
   const col = (p, k) => { const idx = h.findIndex(c=>c.includes(k)); return idx>=0?p[idx]?.replace(/^"|"$/g,'').trim():undefined; };
@@ -1175,41 +1175,105 @@ function parseBisonCSV(lines, sep) {
     'dot':'DOT','link':'LINK','pol':'POL','matic':'MATIC','avax':'AVAX','mana':'MANA','xtz':'XTZ',
     'ltc':'LTC','doge':'DOGE','xlm':'XLM','uni':'UNI','atom':'ATOM','algo':'ALGO'};
 
-  const trades_out = [];
-  // Track existing transaction IDs to avoid re-importing
-  const existingTxIds = new Set(trades.map(t=>t.txId).filter(Boolean));
-
+  // ── Step 1: Parse all relevant rows into raw events ─────────────────────
+  const events = [];
   lines.slice(1).forEach(line => {
     if (!line.trim()) return;
     const p = line.split(sep);
-    const txId   = col(p,'transaction id') || '';
-    const txType = (col(p,'transaction type') || '').toLowerCase();
-    const asset  = col(p,'asset') || '';
-    const eurAmt = parseFloat(col(p,'eur (amount)') || '0') || 0;
+    const txId    = col(p,'transaction id') || '';
+    const txType  = (col(p,'transaction type') || '').toLowerCase();
+    const asset   = col(p,'asset') || '';
+    const eurAmt  = parseFloat(col(p,'eur (amount)') || '0') || 0;
     const assetAmt = parseFloat(col(p,'asset (amount)') || '0') || 0;
     const mktPrice = parseFloat(col(p,'asset (market price)') || '0') || 0;
     let rawDate = col(p,'date') || '';
-    // "2024-01-01 14:28:55" → "2024-01-01"
     if (rawDate.includes(' ')) rawDate = rawDate.split(' ')[0];
     if (rawDate.includes('T')) rawDate = rawDate.split('T')[0];
-
-    // Only import Buy transactions, or Deposit with a non-empty asset (crypto deposit)
-    const isBuy     = txType === 'buy';
-    const isDeposit = txType === 'deposit' && asset;
-    if (!isBuy && !isDeposit) return;
-    if (!asset || assetAmt <= 0) return;
-    // Skip already-imported transaction IDs
-    if (txId && existingTxIds.has(txId)) return;
-
-    // Normalise symbol
-    const sym = SYMBOL_MAP[asset.toLowerCase()] || asset.toUpperCase();
-    // Use market price if available, else derive from eur/qty
-    const buyPrice = mktPrice > 0 ? mktPrice : (eurAmt > 0 && assetAmt > 0 ? eurAmt/assetAmt : 0);
-    if (!sym || assetAmt <= 0 || buyPrice <= 0) return;
-
-    trades_out.push({ txId, date: rawDate, asset: sym, type: 'crypto', qty: assetAmt, buyPrice, platform: 'Bison' });
+    const sym = asset ? (SYMBOL_MAP[asset.toLowerCase()] || asset.toUpperCase()) : '';
+    if (!sym && txType !== 'deposit') return;
+    if (txType === 'buy' || (txType === 'deposit' && sym)) {
+      events.push({ evType:'buy', txId, date:rawDate, sym, assetAmt, mktPrice, eurAmt });
+    } else if (txType === 'sell' && sym && assetAmt > 0) {
+      events.push({ evType:'sell', txId, date:rawDate, sym, assetAmt, mktPrice, eurAmt });
+    }
   });
-  return trades_out.length ? trades_out : null;
+
+  // Sort chronologically so FIFO is correct regardless of CSV order
+  events.sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+  // ── Step 2: FIFO processing ──────────────────────────────────────────────
+  const lotQueues   = {};  // { 'BTC': [{txId, date, qty, buyPrice}] }  — index 0 = oldest
+  const realizedGains = [];
+  const existingTxIds = new Set(trades.map(t=>t.txId).filter(Boolean));
+
+  events.forEach(ev => {
+    const { evType, txId, date, sym, assetAmt, mktPrice, eurAmt } = ev;
+
+    if (evType === 'buy') {
+      const buyPrice = mktPrice > 0 ? mktPrice : (eurAmt > 0 && assetAmt > 0 ? eurAmt/assetAmt : 0);
+      if (!sym || assetAmt <= 0 || buyPrice <= 0) return;
+      if (!lotQueues[sym]) lotQueues[sym] = [];
+      lotQueues[sym].push({ txId, date, qty: assetAmt, buyPrice });
+
+    } else if (evType === 'sell') {
+      if (!lotQueues[sym] || lotQueues[sym].length === 0) return; // no lots to consume
+      const sellPrice = mktPrice > 0 ? mktPrice : (eurAmt > 0 && assetAmt > 0 ? eurAmt/assetAmt : 0);
+      const sellTs = new Date(date).getTime();
+
+      let remainToSell = assetAmt;
+      let totalCost = 0;
+      let allTaxFree = true;
+      const consumedLots = [];
+
+      while (remainToSell > 1e-9 && lotQueues[sym].length > 0) {
+        const lot = lotQueues[sym][0];
+        const heldMs = sellTs - new Date(lot.date).getTime();
+        const taxFreeThisLot = heldMs >= 365 * 86400000;
+        if (!taxFreeThisLot) allTaxFree = false;
+
+        if (lot.qty <= remainToSell + 1e-9) {
+          // Consume entire lot
+          totalCost += lot.qty * lot.buyPrice;
+          consumedLots.push({ qty: lot.qty, date: lot.date, buyPrice: lot.buyPrice, heldDays: Math.floor(heldMs/86400000) });
+          remainToSell -= lot.qty;
+          lotQueues[sym].shift();
+        } else {
+          // Partial lot — split and keep the remainder
+          totalCost += remainToSell * lot.buyPrice;
+          consumedLots.push({ qty: remainToSell, date: lot.date, buyPrice: lot.buyPrice, heldDays: Math.floor(heldMs/86400000) });
+          lot.qty -= remainToSell;
+          remainToSell = 0;
+        }
+      }
+
+      const totalProceeds = eurAmt > 0 ? eurAmt : assetAmt * sellPrice;
+      const gain = totalProceeds - totalCost;
+
+      realizedGains.push({
+        asset: sym, date, txId,
+        qty: assetAmt,
+        sellPrice: sellPrice || (totalProceeds / assetAmt),
+        totalProceeds,
+        totalCost,
+        gain,
+        taxFree: allTaxFree,
+        consumedLots,
+      });
+    }
+  });
+
+  // ── Step 3: Remaining lots → trade objects ───────────────────────────────
+  const remainingLots = [];
+  Object.entries(lotQueues).forEach(([sym, lots]) => {
+    lots.forEach(lot => {
+      if (lot.qty <= 1e-9) return;
+      if (lot.txId && existingTxIds.has(lot.txId)) return; // skip already-imported
+      remainingLots.push({ txId: lot.txId, date: lot.date, asset: sym, type: 'crypto', qty: lot.qty, buyPrice: lot.buyPrice, platform: 'Bison' });
+    });
+  });
+
+  if (!remainingLots.length && !realizedGains.length) return null;
+  return { trades: remainingLots, realizedGains };
 }
 
 function importCSV(e) {
@@ -1225,8 +1289,11 @@ function importCSV(e) {
     const lines = raw.split('\n').filter(l=>l.trim());
     if (!lines.length) { if(resultEl){resultEl.innerHTML='<span style="color:var(--red);">Leere Datei</span>';} return; }
 
-    let parsedTrades = parseTRCSV(lines, sep) || parseBisonCSV(lines, sep);
-    let platform_detected = parsedTrades ? (parsedTrades[0]?.platform || 'Auto') : null;
+    const parsedResult  = parseTRCSV(lines, sep) || parseBisonCSV(lines, sep);
+    // parseBisonCSV returns { trades, realizedGains }; parseTRCSV returns a flat array
+    let parsedTrades    = Array.isArray(parsedResult) ? parsedResult : (parsedResult?.trades || null);
+    const realizedGains = Array.isArray(parsedResult) ? [] : (parsedResult?.realizedGains || []);
+    let platform_detected = parsedTrades?.length ? (parsedTrades[0]?.platform || 'Auto') : (realizedGains.length ? 'Bison' : null);
 
     if (!parsedTrades) {
       // Generic custom format: datum,asset,typ,menge,kaufpreis[,aktuell][,plattform]
@@ -1256,7 +1323,30 @@ function importCSV(e) {
     });
     saveAll(); renderAll();
     addLog(`CSV (${platform_detected}): +${added}`);
-    const msg = `✓ ${added} ${t('imported')} [${platform_detected}]${skipped?` · ${skipped} ${lang==='de'?'Duplikate':'duplicates'}`:''}`;
+    let msg = `✓ ${added} ${t('imported')} [${platform_detected}]${skipped?` · ${skipped} ${lang==='de'?'Duplikate':'duplicates'}`:''}`;
+    // Show realized gains summary from FIFO sell processing
+    if (realizedGains.length > 0) {
+      const totalGain = realizedGains.reduce((s,g)=>s+g.gain, 0);
+      const gainSign  = totalGain >= 0 ? '+' : '';
+      const gainColor = totalGain >= 0 ? 'var(--green)' : 'var(--red)';
+      const taxFreeCount = realizedGains.filter(g=>g.taxFree).length;
+      const gainsHtml = realizedGains.map(g => {
+        const gs = g.gain >= 0 ? '+' : '';
+        return `<tr><td>${g.asset}</td><td>${g.date}</td><td>${g.qty.toFixed(6)}</td><td style="color:${g.gain>=0?'var(--green)':'var(--red)'}">${gs}€${g.gain.toFixed(2)}</td><td>${g.taxFree?'<span style="color:var(--green)">✓ steuerfrei</span>':'<span style="color:var(--accent)">steuerpflichtig</span>'}</td></tr>`;
+      }).join('');
+      const gainsBlock = `<div style="margin-top:12px;font-size:12px;">
+        <strong>📊 ${lang==='de'?'Realisierte Gewinne/Verluste':'Realized Gains/Losses'} (${realizedGains.length} ${lang==='de'?'Verkäufe':'sales'})</strong>
+        <div style="color:${gainColor};font-size:14px;margin:4px 0;">${gainSign}€${totalGain.toFixed(2)} gesamt${taxFreeCount>0?` · ${taxFreeCount} steuerfrei`:''}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px;">
+          <tr style="color:var(--muted);"><th style="text-align:left">Asset</th><th>Datum</th><th>Menge</th><th>G&amp;V</th><th>Status</th></tr>
+          ${gainsHtml}
+        </table></div>`;
+      if (resultEl) { resultEl.style.color='var(--green)'; resultEl.innerHTML = msg + gainsBlock; }
+      addLog(`Bison FIFO G&V: ${gainSign}€${totalGain.toFixed(2)} (${realizedGains.length} Verkäufe, ${taxFreeCount} steuerfrei)`);
+      toast(`${msg.replace('✓ ','')} · G&V: ${gainSign}€${totalGain.toFixed(2)}`, totalGain >= 0 ? 'green' : 'red');
+      fetchLivePrices();
+      return; // Don't auto-close so user can see gains
+    }
     if (resultEl) { resultEl.style.color='var(--green)'; resultEl.innerHTML=msg; }
     toast(msg.replace('✓ ',''), 'green');
     fetchLivePrices();
@@ -2349,6 +2439,22 @@ function calcVorabpauschale() {
     total += steuer;
   });
   return total;
+}
+
+// ── Delete All Positions ─────────────────────────────────────────────────────
+function confirmDeleteAllPositions() {
+  if (!trades.length) { toast(lang==='de'?'Keine Positionen vorhanden':'No positions to delete', 'yellow'); return; }
+  const count = trades.length;
+  const confirmed = confirm(
+    (lang==='de'
+      ? `Alle ${count} Positionen unwiderruflich löschen?\n\nDiese Aktion kann nicht rückgängig gemacht werden.`
+      : `Permanently delete all ${count} positions?\n\nThis action cannot be undone.`)
+  );
+  if (!confirmed) return;
+  trades = [];
+  saveAll(); renderAll();
+  addLog(lang==='de'?`Alle ${count} Positionen gelöscht`:`All ${count} positions deleted`);
+  toast(lang==='de'?`🗑 ${count} Positionen gelöscht`:`🗑 ${count} positions deleted`, 'red');
 }
 
 // ── CSV Export ───────────────────────────────────────────────────────────────
