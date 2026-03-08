@@ -114,7 +114,7 @@ exports.handler = async function(event, context) {
         },
         body: JSON.stringify({
           model,
-          max_tokens: body.max_tokens || 1000,
+          max_tokens: body.max_tokens || 2000,
           messages: body.messages,
         }),
       });
@@ -132,6 +132,21 @@ exports.handler = async function(event, context) {
     // ── GPT (OpenAI) ────────────────────────────────────────────────────────
     if (provider === 'openai' || provider === 'gpt') {
       const model = body.model || 'gpt-4o-mini';
+      // OpenAI doesn't support Anthropic's {type:'document'} content type.
+      // Convert it to a plain text message so GPT can still process it.
+      const processedMessages = (body.messages || []).map(m => {
+        if (!Array.isArray(m.content)) return m;
+        const hasDoc = m.content.some(c => c.type === 'document');
+        if (!hasDoc) return m;
+        // Build a unified text message from all parts (skip base64 blob itself)
+        const textParts = m.content
+          .filter(c => c.type === 'text')
+          .map(c => c.text);
+        const docNote = m.content.some(c => c.type === 'document')
+          ? '[Note: A PDF was provided but could not be read directly. The extracted text is included in this message if available.]'
+          : '';
+        return { role: m.role, content: [docNote, ...textParts].filter(Boolean).join('\n\n') };
+      });
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -140,8 +155,8 @@ exports.handler = async function(event, context) {
         },
         body: JSON.stringify({
           model,
-          max_tokens: body.max_tokens || 1000,
-          messages: body.messages,
+          max_tokens: body.max_tokens || 2000,
+          messages: processedMessages,
         }),
       });
       const data = await response.json();
@@ -189,7 +204,7 @@ exports.handler = async function(event, context) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: geminiContents,
-          generationConfig: { maxOutputTokens: body.max_tokens || 1000 },
+          generationConfig: { maxOutputTokens: body.max_tokens || 2000 },
         }),
       });
       const data = await response.json();

@@ -6,6 +6,8 @@
 <title>GERY — Vermögensübersicht</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
   --bg:#0d0d0b; --surface:#141410; --surface2:#1c1c17; --surface3:#242420;
@@ -314,6 +316,7 @@ tr:hover td{background:var(--surface2);}
       <div class="stat-card"><div class="stat-label" data-de="Gewinn / Verlust" data-en="Gain / Loss">Gewinn / Verlust</div><div class="stat-value mono" id="stat-gain">€0,00</div><div class="stat-sub" id="stat-gain-pct">—</div></div>
       <div class="stat-card"><div class="stat-label" data-de="Krypto (Marktwert)" data-en="Crypto (Market Value)">Krypto (Marktwert)</div><div class="stat-value mono" id="stat-crypto">€0,00</div><div class="stat-sub" id="stat-crypto-sub"><span class="live-dot"></span><span data-de="Live-Preise" data-en="Live prices">Live-Preise</span></div></div>
       <div class="stat-card"><div class="stat-label" data-de="Steuerfreie Crypto" data-en="Tax-Free Crypto">Steuerfreie Crypto</div><div class="stat-value mono" id="stat-tax-free">0</div><div class="stat-sub pos" data-de="≥ 1 Jahr gehalten" data-en="≥ 1 year held">≥ 1 Jahr gehalten</div></div>
+      <div class="stat-card" title="Vorabpauschale 2025: Basiszins 2,53% × ETF-Wert × 70% Teilfreistellung × 26,375%"><div class="stat-label" data-de="Vorabpauschale (ETF)" data-en="ETF Pre-Tax (Est.)">Vorabpauschale (ETF)</div><div class="stat-value mono" id="stat-vorab">€0</div><div class="stat-sub neg" id="stat-vorab-sub" data-de="Geschätzt 2025" data-en="Estimated 2025">Geschätzt 2025</div></div>
     </div>
     <div class="grid-2" style="margin-bottom:14px;">
       <div class="card">
@@ -322,6 +325,7 @@ tr:hover td{background:var(--surface2);}
       </div>
       <div class="card">
         <div class="card-title"><span data-de="Allokation" data-en="Allocation">Allokation</span></div>
+        <canvas id="alloc-chart" height="160" style="max-height:160px;margin-bottom:10px;"></canvas>
         <div id="allocation-view"></div>
       </div>
     </div>
@@ -346,6 +350,7 @@ tr:hover td{background:var(--surface2);}
     <div class="page-header">
       <div><div class="page-title serif" data-de="Portfolio" data-en="Portfolio">Portfolio</div><div class="page-sub" data-de="// alle Positionen mit Live-Kursen" data-en="// all positions with live prices">// alle Positionen mit Live-Kursen</div></div>
       <div class="ph-actions">
+        <button class="btn-secondary" onclick="exportCSV()" data-de="⬇ CSV Export" data-en="⬇ CSV Export">⬇ CSV Export</button>
         <button class="btn-secondary" onclick="openImportModal()" data-de="📎 Importieren" data-en="📎 Import">📎 Importieren</button>
         <button class="btn-accent" onclick="openAddTrade()" data-de="+ Position" data-en="+ Add Position">+ Position</button>
       </div>
@@ -1561,6 +1566,76 @@ function importAllParsed() {
 // ═══════════════════════════════════════════════════
 //  PDF IMPORT (AI) — handles Depotauszug (portfolio snapshot) format
 // ═══════════════════════════════════════════════════
+// ── PDF helpers ─────────────────────────────────────────────────────────────
+function arrayBufferToBase64(buf) {
+  let bin = '', bytes = new Uint8Array(buf), len = bytes.byteLength;
+  for (let i = 0; i < len; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+async function extractPDFText(arrayBuffer) {
+  try {
+    if (typeof pdfjsLib === 'undefined') return null;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(it => it.str).join(' ') + '\n';
+    }
+    return text.trim();
+  } catch(e) { return null; }
+}
+function extractJSON(raw) {
+  // 1. Strip code fences (any variant)
+  let cleaned = raw.replace(/```[\w]*\n?/g, '').replace(/```/g, '').trim();
+  // 2. Try direct parse
+  try { return JSON.parse(cleaned); } catch(_) {}
+  // 3. Find the first { ... } JSON object using balanced bracket scan
+  const start = cleaned.indexOf('{');
+  if (start === -1) throw new SyntaxError('No JSON object found in AI response');
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\' && inStr) { esc = true; continue; }
+    if (ch === '"') inStr = !inStr;
+    if (!inStr) { if (ch === '{') depth++; else if (ch === '}') { depth--; if (depth === 0) return JSON.parse(cleaned.slice(start, i+1)); } }
+  }
+  throw new SyntaxError('Incomplete JSON in AI response (truncated?)');
+}
+
+const PDF_PROMPT = `You are a JSON extractor for Trade Republic PDF broker statements. Identify the document type and extract ALL positions/transactions.
+
+DOCUMENT TYPES:
+- "Depotauszug": depot snapshot — ISIN, qty, current price per share (date = statement date)
+- "Cryptoauszug": crypto snapshot — qty, KAUFWERT IN EUR (total EUR paid originally)
+- "Kontoauszug": transaction history — extract ONLY buy/Sparplan transactions, skip sells/withdrawals/fees
+
+OUTPUT RULES (CRITICAL):
+- Return ONLY compact JSON — NO spaces, NO newlines, NO markdown, NO preamble, NO explanation
+- Start immediately with the { character
+
+FIELDS:
+- asset: short ticker (NVDA, BTC, AAPL, MSCI-WORLD…)
+- fullName: full name from PDF
+- isin: ISIN string or null
+- txId: transaction/order ID if present (Kontoauszug); null for snapshots
+- type: "stock"|"etf"|"crypto"|"metal"
+  metal: precious-metal ETC (name has Gold/Silber/Platin/Palladium)
+  etf: non-metal fund (ETF/iShares/SPDR/Invesco/Xtr./UCITS)
+  crypto: BTC/ETH/SOL/ADA/XRP/Bitcoin/Ethereum etc.
+  stock: everything else
+- platform: broker name from PDF header
+- qty: units (German decimal: 1.234,56→1234.56)
+- buyPrice: EUR per unit paid — Kontoauszug and Cryptoauszug only (kaufwert/qty); null for Depotauszug
+- currentPrice: KURS PRO STÜCK — Depotauszug only; 0 otherwise
+- kaufwert: KAUFWERT IN EUR total — Cryptoauszug only; null otherwise
+- date: YYYY-MM-DD (exact trade date for Kontoauszug; statement date for snapshots)
+
+EXAMPLE (start with {, compact, no spaces):
+{"broker":"Trade Republic","docType":"Depotauszug","date":"2026-03-04","trades":[{"asset":"NVDA","fullName":"NVIDIA Corp.","isin":"US67066G1040","txId":null,"type":"stock","platform":"Trade Republic","qty":4.0,"buyPrice":null,"currentPrice":156.92,"kaufwert":null,"date":"2026-03-04"}]}`;
+
 async function handlePDFUpload(event) {
   const file = event.target.files[0]; if (!file) return;
   const result = document.getElementById('pdf-parse-result');
@@ -1571,49 +1646,42 @@ async function handlePDFUpload(event) {
     result.innerHTML=`<div style="color:var(--red);font-size:12px;">${lang==='de'?'⚙ Bitte zuerst den API-Key in den KI-Einstellungen eingeben.':'⚙ Please enter your API key in AI Settings first.'}</div>`;
     return;
   }
+
   const fileReader = new FileReader();
   fileReader.onload = async ev => {
-    const b64 = ev.target.result.split(',')[1];
+    const arrayBuffer = ev.target.result;
     try {
-      const prompt = `You are parsing a Trade Republic broker statement PDF. First identify the document type:
+      const provider = (cfgPDF.provider||'claude').toLowerCase();
 
-DOCUMENT TYPES:
-1. "Depotauszug" (Stock/ETF depot overview) — contains securities with ISIN, qty, current price
-2. "Cryptoauszug" (Crypto depot overview) — contains crypto assets, qty, KAUFWERT IN EUR (= total amount originally paid), current price
-3. "Kontoauszug" (Account statement) — long list of individual cash/buy/sell transactions
-
-For Depotauszug and Cryptoauszug, extract EVERY position. For Kontoauszug, extract only BUY transactions.
-
-For each position/trade return:
-- asset: Short recognisable ticker/symbol (e.g. "NVDA", "BTC", "ETH", "MSCI-WORLD")
-- fullName: Full asset name as shown in the PDF
-- isin: ISIN code if present (e.g. "US67066G1040"), else null
-- type: "stock" | "etf" | "crypto"
-  ETF: name contains ETF, iShares, SPDR, Invesco, Xtr., UCITS, ETC, Gold, Silber | ISIN starts with IE
-  crypto: Bitcoin, Ethereum, Solana, BTC, ETH, SOL, ADA, XRP, etc.
-- platform: Broker name from PDF (e.g. "Trade Republic")
-- qty: Number of units (decimal allowed)
-- currentPrice: Current price per unit in EUR (column "KURS PRO STÜCK" or similar), or 0 if unknown
-- kaufwert: ONLY for Cryptoauszug — the "KAUFWERT IN EUR" column value (total EUR paid for this position). Set to null for Depotauszug/Kontoauszug.
-- date: Statement/transaction date in YYYY-MM-DD format
-
-Return ONLY valid JSON, no markdown, no explanation:
-{"broker":"Trade Republic","docType":"Depotauszug","date":"2026-03-04","trades":[{"asset":"NVDA","fullName":"NVIDIA Corp.","isin":"US67066G1040","type":"stock","platform":"Trade Republic","qty":4.0,"currentPrice":156.92,"kaufwert":null,"date":"2026-03-04"},{"asset":"BTC","fullName":"Bitcoin","isin":null,"type":"crypto","platform":"Trade Republic","qty":0.021,"currentPrice":82500.00,"kaufwert":1245.60,"date":"2026-03-04"}]}`;
+      // Extract text for GPT/Gemini (they don't support the native document type)
+      // Claude uses native PDF document type (superior quality)
+      let messages;
+      if (provider === 'claude') {
+        const b64 = arrayBufferToBase64(arrayBuffer);
+        messages = [{role:'user', content:[
+          {type:'document', source:{type:'base64', media_type:'application/pdf', data:b64}},
+          {type:'text', text:PDF_PROMPT}
+        ]}];
+      } else {
+        // Text extraction for GPT/Gemini
+        result.innerHTML=`<div style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:12px;">⏳ ${lang==='de'?'PDF wird gelesen...':'Reading PDF...'}</div>`;
+        const pdfText = await extractPDFText(arrayBuffer);
+        if (!pdfText) throw new Error(lang==='de'?'PDF-Text konnte nicht extrahiert werden. Bitte Claude als KI-Anbieter verwenden.':'Could not extract PDF text. Please use Claude as AI provider.');
+        result.innerHTML=`<div style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:12px;">⏳ ${lang==='de'?'KI analysiert...':'AI analysing...'}</div>`;
+        messages = [{role:'user', content:`${PDF_PROMPT}\n\nHere is the PDF content:\n\n${pdfText}`}];
+      }
 
       const res = await fetch('/api/claude',{
         method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          provider:cfgPDF.provider, apiKey:cfgPDF.apiKey, model:cfgPDF.model, max_tokens:4000,
-          messages:[{role:'user', content:[
-            {type:'document', source:{type:'base64', media_type:'application/pdf', data:b64}},
-            {type:'text', text:prompt}
-          ]}]
+          provider:cfgPDF.provider, apiKey:cfgPDF.apiKey, model:cfgPDF.model, max_tokens:8192,
+          messages
         })
       });
       const data = await res.json();
       if (data.error) throw new Error(typeof data.error==='object'?(data.error.message||JSON.stringify(data.error)):data.error);
       const raw = data.content.map(c=>c.text||'').join('');
-      const parsed = JSON.parse(raw.replace(/```json\n?|```/g,'').trim());
+      const parsed = extractJSON(raw);
       if (!parsed.trades?.length) {
         result.innerHTML=`<div style="color:var(--red);font-size:12px;">${lang==='de'?'❌ Keine Positionen im PDF gefunden.':'❌ No positions found in PDF.'}</div>`;
         return;
@@ -1699,7 +1767,7 @@ Return ONLY valid JSON, no markdown, no explanation:
       result.innerHTML=`<div style="color:var(--red);font-size:12px;">❌ ${e.message}<br><span style="color:var(--muted);font-size:10px;">${lang==='de'?'Tipp: Prüfe den API-Key in den KI-Einstellungen.':'Tip: Check your API key in AI Settings.'}</span></div>`;
     }
   };
-  fileReader.readAsDataURL(file);
+  fileReader.readAsArrayBuffer(file);
 }
 
 function confirmPDFImport() {
@@ -1707,14 +1775,21 @@ function confirmPDFImport() {
   let added = 0;
   p.newTrades.forEach((tr, i) => {
     const currentPrice = parseFloat(tr.currentPrice) || 0;
-    const qty = parseFloat(tr.qty) || 0;
-    // Use KAUFWERT to calculate real buy price if available (Cryptoauszug)
-    const kaufwert = parseFloat(tr.kaufwert) || 0;
-    const buyPrice = (kaufwert && qty) ? (kaufwert / qty) : currentPrice;
+    const qty          = parseFloat(tr.qty) || 0;
+    const kaufwert     = parseFloat(tr.kaufwert) || 0;
+    const buyPriceRaw  = parseFloat(tr.buyPrice) || 0;
+    // Buy price priority: explicit buyPrice (Kontoauszug) > kaufwert/qty (Cryptoauszug) > currentPrice (Depotauszug)
+    const buyPrice = buyPriceRaw > 0 ? buyPriceRaw
+                   : (kaufwert && qty) ? (kaufwert / qty)
+                   : currentPrice;
     const liveP = tr.type==='crypto' ? getLivePrice(tr.asset) : null;
+    // Kontoauszug txId dedup (already checked, but store txId for future)
+    const txId = tr.txId || '';
+    if (txId && trades.some(t => t.txId && t.txId === txId)) return; // safety dedup
     trades.push({
       id: Date.now()+i,
-      asset: tr.asset.toUpperCase(),
+      txId,
+      asset: (tr.asset||'?').toUpperCase(),
       isin: tr.isin || '',
       type: tr.type || 'stock',
       platform: tr.platform || p.broker || 'Trade Republic',
@@ -2178,6 +2253,15 @@ function renderDashboard() {
   document.getElementById('stat-gain-pct').className='stat-sub '+(gain>=0?'pos':'neg');
   document.getElementById('stat-crypto').textContent=fmt(cTotal);
   document.getElementById('stat-tax-free').textContent=tfCount;
+  // Vorabpauschale
+  const vorab = calcVorabpauschale();
+  const vorabEl = document.getElementById('stat-vorab');
+  const vorabSubEl = document.getElementById('stat-vorab-sub');
+  if (vorabEl) vorabEl.textContent = fmt(vorab);
+  const etfCount = trades.filter(t=>t.type==='etf').length;
+  if (vorabSubEl) vorabSubEl.textContent = etfCount > 0
+    ? (lang==='de' ? `${etfCount} ETF-Positionen · Basiszins 2,53%` : `${etfCount} ETF positions · Base rate 2.53%`)
+    : (lang==='de' ? 'Keine ETF-Positionen' : 'No ETF positions');
 
   const recent=[...trades].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
   const tbody=document.getElementById('recent-trades-body');
@@ -2190,20 +2274,119 @@ function renderDashboard() {
   renderDashPrices();
 }
 
+let _allocChart = null;
 function renderAllocation() {
-  const total=trades.reduce((s,t)=>s+(t.qty*t.currentPrice),0);
-  const el=document.getElementById('allocation-view');
-  if(!total||!el){el&&(el.innerHTML=`<div class="empty-state"><div class="icon">📊</div>${t('addFirst')}</div>`);return;}
-  const groups={};
-  trades.forEach(tr=>{const v=tr.qty*tr.currentPrice;groups[tr.asset]=(groups[tr.asset]||0)+v;});
-  const colors=['#c9a84c','#4caf7d','#5b8fd4','#e05599','#e8a020','#a855f7','#00d4ff','#ff6b35'];
-  el.innerHTML=Object.entries(groups).sort((a,b)=>b[1]-a[1]).map(([name,val],i)=>`
+  const total = trades.reduce((s,t) => s + (t.qty * (t.currentPrice || t.buyPrice || 0)), 0);
+  const el = document.getElementById('allocation-view');
+  const canvas = document.getElementById('alloc-chart');
+  if (!total || !el) {
+    el && (el.innerHTML = `<div class="empty-state"><div class="icon">📊</div>${t('addFirst')}</div>`);
+    if (canvas) canvas.style.display = 'none';
+    return;
+  }
+
+  // Group by asset (sum if multiple lots)
+  const groups = {};
+  trades.forEach(tr => {
+    const v = tr.qty * (tr.currentPrice || tr.buyPrice || 0);
+    groups[tr.asset] = (groups[tr.asset] || 0) + v;
+  });
+  const sorted = Object.entries(groups).sort((a,b) => b[1]-a[1]);
+  const colors = ['#c9a84c','#4caf7d','#5b8fd4','#e05599','#e8a020','#a855f7','#00d4ff','#ff6b35','#ff4757','#2ed573','#ffa502','#eccc68'];
+
+  // ── Donut chart ──
+  if (canvas && typeof Chart !== 'undefined') {
+    canvas.style.display = 'block';
+    const top8 = sorted.slice(0, 8);
+    const otherVal = sorted.slice(8).reduce((s,[,v]) => s+v, 0);
+    const labels = top8.map(([n]) => n);
+    const data   = top8.map(([,v]) => v);
+    if (otherVal > 0) { labels.push('Sonstige'); data.push(otherVal); }
+    if (_allocChart) _allocChart.destroy();
+    _allocChart = new Chart(canvas, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: '#0d0d0b', borderWidth: 2 }] },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        cutout: '65%',
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${ctx.label}: €${Math.round(ctx.raw).toLocaleString('de-DE')} (${(ctx.raw/total*100).toFixed(1)}%)`
+            }
+          }
+        }
+      }
+    });
+  } else if (canvas) {
+    canvas.style.display = 'none';
+  }
+
+  // ── Bar list (top 6) ──
+  el.innerHTML = sorted.slice(0, 6).map(([name,val], i) => `
     <div class="alloc-item">
       <div class="alloc-dot" style="background:${colors[i%colors.length]}"></div>
       <div class="alloc-name">${name}</div>
       <div class="alloc-bar-wrap"><div class="alloc-bar" style="width:${(val/total*100).toFixed(1)}%;background:${colors[i%colors.length]}"></div></div>
       <div class="alloc-pct">${(val/total*100).toFixed(1)}%</div>
-    </div>`).join('');
+    </div>`).join('') +
+    (sorted.length > 6 ? `<div style="color:var(--muted);font-size:10px;margin-top:6px;">+ ${sorted.length-6} weitere Assets</div>` : '');
+}
+
+// ── Vorabpauschale 2025 ──────────────────────────────────────────────────────
+function calcVorabpauschale() {
+  const BASISZINS = 0.0253; // 2,53% — Bundesbank 2025
+  const TEILFREISTELLUNG = 0.70; // 30% Teilfreistellung für Aktien-ETFs
+  const KEST = 0.26375; // Abgeltungssteuer inkl. Soli
+  let total = 0;
+  trades.forEach(tr => {
+    if (tr.type !== 'etf') return;
+    const currentVal = tr.qty * (tr.currentPrice || tr.buyPrice || 0);
+    const basisertrag = currentVal * BASISZINS;
+    const vorabpauschale = basisertrag * TEILFREISTELLUNG;
+    const steuer = vorabpauschale * KEST;
+    total += steuer;
+  });
+  return total;
+}
+
+// ── CSV Export ───────────────────────────────────────────────────────────────
+function exportCSV() {
+  if (!trades.length) { toast(lang==='de'?'Keine Positionen zum Exportieren':'No positions to export', 'yellow'); return; }
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const header = ['Asset','ISIN','Typ','Plattform','Menge','Kaufpreis (EUR)','Aktueller Preis (EUR)','Kaufdatum','Wert (EUR)','G&V (EUR)','G&V (%)','Steuerstatus','TxID'];
+  const rows = trades.map(tr => {
+    const currentPrice = tr.currentPrice || tr.buyPrice || 0;
+    const val = tr.qty * currentPrice;
+    const cost = tr.qty * tr.buyPrice;
+    const pl = val - cost;
+    const plPct = cost > 0 ? (pl/cost*100).toFixed(2) : '0.00';
+    const heldDays = tr.date ? daysBetween(new Date(tr.date), now) : 0;
+    let taxStatus = '';
+    if (tr.type === 'crypto' || tr.type === 'metal') {
+      taxStatus = heldDays >= 365 ? 'Steuerfrei (§23 EStG)' : `Steuerpflichtig (noch ${Math.max(0,365-heldDays)}d)`;
+    } else if (tr.type === 'etf') {
+      taxStatus = 'Abgeltungssteuer 18,46% (30% Teilfreistellung)';
+    } else {
+      taxStatus = 'Abgeltungssteuer 26,375%';
+    }
+    return [
+      tr.asset, tr.isin||'', tr.type||'stock', tr.platform||'',
+      tr.qty, tr.buyPrice?.toFixed(4)||'', currentPrice.toFixed(4),
+      tr.date||'', val.toFixed(2), pl.toFixed(2), plPct,
+      taxStatus, tr.txId||''
+    ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(';');
+  });
+  const csv = '\uFEFF' + [header.join(';'), ...rows].join('\r\n'); // BOM for Excel
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `gery-portfolio-${dateStr}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  toast(`✓ CSV exportiert (${trades.length} Positionen)`, 'green');
+  addLog(`CSV Export: ${trades.length} Lots`);
 }
 
 function renderDashPrices() {
